@@ -240,11 +240,11 @@ static struct sf_blocklist_item *sf_blocklist_item_create(size_t addr)
     return item;
 }
 
-static void sf_add_blocklist_item(struct sf_node *node, struct sf_blocklist_item *item)
+static void sf_blocklist_item_add(struct sf_node *node, struct sf_blocklist_item *item)
 {
     struct sf_blocklist_item *tmp;
 
-    sf_log_debug("sf_add_blocklist_item(node=%p, item=%p)\n", node, item);
+    sf_log_debug("sf_blocklist_item_add(node=%p, item=%p)\n", node, item);
 
     tmp = node->blocklist;
 
@@ -466,7 +466,7 @@ ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node
                 return addr;
 
             item = sf_blocklist_item_create(addr);
-            sf_add_blocklist_item(node, item);
+            sf_blocklist_item_add(node, item);
 
             node->st->st_blocks += BLOCK_SIZE / 512;
         }
