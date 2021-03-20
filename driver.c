@@ -791,9 +791,7 @@ int main(int argc, char** argv)
     argv[2] = NULL;
     argc--;
 
-#ifdef SF_LOG
-    sf_log_init(LOG_DEBUG, "./log.txt", "w+");
-#endif
+    sf_log_init(LOG_ERROR, "./log.txt", "w+");
 
     ret = pthread_mutex_init(&lock_node, NULL);
 
@@ -815,9 +813,7 @@ int main(int argc, char** argv)
 
     pthread_mutex_destroy(&lock_node);
 
-#ifdef SF_LOG
     sf_log_destroy();
-#endif
 
     return ret;
 }
