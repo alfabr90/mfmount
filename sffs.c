@@ -374,7 +374,10 @@ struct sf_node *sf_node_create(const char *name, mode_t mode, struct sf_node *pa
 
 int sf_node_add(struct sf_node *parent, struct sf_node *node)
 {
+    int ret;
     struct sf_nodelist_item *item, *tmp;
+
+    ret = 0;
 
     sf_log_debug("sf_node_add(parent=%p, node=%p)\n", parent, node);
 
@@ -390,7 +393,7 @@ int sf_node_add(struct sf_node *parent, struct sf_node *node)
     if (tmp != NULL)
         tmp->prev = item;
 
-    return 0;
+    return ret;
 }
 
 ssize_t sf_node_read(char *buf, size_t size, off_t offset, struct sf_node *node)
@@ -498,7 +501,8 @@ ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node
 ssize_t sf_node_resize(struct sf_node *node, size_t size)
 {
     int i;
-    size_t diff, ret;
+    size_t diff;
+    ssize_t ret;
     char *buf;
     struct sf_blocklist_item *curblock, *nextblock;
 
@@ -565,7 +569,7 @@ ssize_t sf_node_resize(struct sf_node *node, size_t size)
     return ret;
 }
 
-int sf_node_remove(struct sf_node *node)
+void sf_node_remove(struct sf_node *node)
 {
     struct sf_nodelist_item *item;
 
@@ -586,11 +590,9 @@ int sf_node_remove(struct sf_node *node)
         item->next->prev = item->prev;
 
     free(item);
-
-    return 0;
 }
 
-int sf_node_destroy(struct sf_node *node)
+void sf_node_destroy(struct sf_node *node)
 {
     struct sf_blocklist_item *curblock, *nextblock;
 
@@ -610,8 +612,6 @@ int sf_node_destroy(struct sf_node *node)
     free(node->name);
     free(node->st);
     free(node);
-
-    return 0;
 }
 
 struct sf_state *sf_get_state()
@@ -646,6 +646,8 @@ int sf_has_availspace(size_t size)
     int ret;
     fsblkcnt_t blocks;
 
+    ret = 0;
+
     sf_log_debug("sf_has_availspace(size=%lu)\n", size);
 
     blocks = size / BLOCK_SIZE;
@@ -666,10 +668,12 @@ int sf_init(const char *filename)
     fsblkcnt_t size;
     const char *rootname = "";
 
+    ret = 0;
+
     sf_log_debug("sf_init(filename=%s)\n", filename);
 
     if (sf_get_state() != NULL)
-        return 0;
+        return ret;
 
     sf_data = malloc(sizeof(struct sf_state));
 
@@ -681,8 +685,8 @@ int sf_init(const char *filename)
     sf_data->fh = fopen(filename, "rb+");
 
     if (sf_data->fh == NULL) {
-        sf_destroy();
-        return -errno;
+        ret = -errno;
+        goto err;
     }
 
     fseek(sf_data->fh, 0, SEEK_END);
@@ -725,35 +729,33 @@ int sf_init(const char *filename)
     sf_data->rootnode = sf_node_create(rootname, S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO, NULL);
 
     if (sf_data->rootnode == NULL) {
-        sf_destroy();
-        return -errno;
+        ret = -errno;
+        goto err;
     }
 
     ret = pthread_mutex_init(&lock_ino, NULL);
 
-    if (ret < 0) {
-        sf_destroy();
-        return ret;
-    }
+    if (ret < 0)
+        goto err;
 
     ret = pthread_mutex_init(&lock_addr, NULL);
 
-    if (ret < 0) {
-        sf_destroy();
-        return ret;
-    }
+    if (ret < 0)
+        goto err;
 
     ret = pthread_mutex_init(&lock_stat, NULL);
 
-    if (ret < 0) {
-        sf_destroy();
-        return ret;
-    }
+    if (ret < 0)
+        goto err;
 
-    return 0;
+    return ret;
+
+err:
+    sf_destroy();
+    return ret;
 }
 
-int sf_destroy()
+void sf_destroy()
 {
     sf_log_debug("sf_destroy()\n");
 
@@ -772,6 +774,4 @@ int sf_destroy()
     pthread_mutex_destroy(&lock_stat);
 
     free(sf_data);
-
-    return 0;
 }
