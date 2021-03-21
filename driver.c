@@ -19,105 +19,127 @@ static pthread_mutex_t lock_node;
 
 static int sf_access(const char *path, int mask)
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_access(path=%s, mask=%d)\n", path, mask);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_access(path=%s, mask=%d): %s\n", path, mask, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_access(path=%s, mask=%d): %s\n", path, mask, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     // TODO: check permissions
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_access(path=%s, mask=%d): %s\n", path, mask, strerror(-ret));
+    return ret;
 }
 
 static int sf_getattr(const char *path, struct stat *statbuf)
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_getattr(path=%s)\n", path);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_getattr(path=%s): %s\n", path, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_getattr(path=%s): %s\n", path, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     memcpy(statbuf, node->st, sizeof(struct stat));
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_getattr(path=%s): %s\n", path, strerror(-ret));
+    return ret;
 }
 
 static int sf_chmod(const char *path, mode_t mode)
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_chmod(path=%s, mode=%u)\n", path, mode);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_chmod(path=%s, mode=%u): %s\n", path, mode, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_chmod(path=%s, mode=%u): %s\n", path, mode, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     node->st->st_mode = mode;
     node->st->st_ctime = time(NULL);
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_chmod(path=%s, mode=%u): %s\n", path, mode, strerror(-ret));
+    return ret;
 }
 
 static int sf_chown(const char *path, uid_t uid, gid_t gid)
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_chown(path=%s, uid=%u, gid=%u)\n", path, uid, gid);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_chown(path=%s, uid=%u, gid=%u): %s\n", path, uid, gid, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_chown(path=%s, uid=%u, gid=%u): %s\n", path, uid, gid, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     node->st->st_uid = uid;
@@ -125,28 +147,35 @@ static int sf_chown(const char *path, uid_t uid, gid_t gid)
     node->st->st_ctime = time(NULL);
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_chown(path=%s, uid=%u, gid=%u): %s\n", path, uid, gid, strerror(-ret));
+    return ret;
 }
 
 static int sf_utimens(const char *path, const struct timespec ts[2])
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_utimens(path=%s)\n", path);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_utimens(path=%s): %s\n", path, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_utimens(path=%s): %s\n", path, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     node->st->st_atime = ts[0].tv_sec;
@@ -154,7 +183,13 @@ static int sf_utimens(const char *path, const struct timespec ts[2])
     node->st->st_ctime = time(NULL);
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_utimens(path=%s): %s\n", path, strerror(-ret));
+    return ret;
 }
 
 static int sf_mkdir(const char *path, mode_t mode)
@@ -163,28 +198,26 @@ static int sf_mkdir(const char *path, mode_t mode)
     char *name;
     struct sf_node *parent, *node;
 
+    ret = 0;
+
     sf_log_debug("sf_mkdir(path=%s, mode=%u)\n", path, mode);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_mkdir(path=%s, mode=%u): %s\n", path, mode, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     if (sf_node_find(path) != NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_mkdir(path=%s, mode=%u): %s\n", path, mode, strerror(EEXIST));
-        return -EEXIST;
+        ret = -EEXIST;
+        goto err_unlock;
     }
 
     parent = sf_node_find_parent(path);
 
     if (parent == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_mkdir(path=%s, mode=%u): %s\n", path, mode, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     name = sf_get_filename(path);
@@ -194,10 +227,8 @@ static int sf_mkdir(const char *path, mode_t mode)
     free(name);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_mkdir(path=%s, mode=%u): %s\n", path, mode, strerror(errno));
-        return -errno;
+        ret = -errno;
+        goto err_unlock;
     }
 
     ret = sf_node_add(parent, node);
@@ -205,12 +236,16 @@ static int sf_mkdir(const char *path, mode_t mode)
 
     if (ret < 0) {
         sf_node_destroy(node);
-
-        sf_log_error("sf_mkdir(path=%s, mode=%u): %s\n", path, mode, strerror(-ret));
-        return ret;
+        goto err;
     }
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_mkdir(path=%s, mode=%u): %s\n", path, mode, strerror(-ret));
+    return ret;
 }
 
 static int sf_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
@@ -220,19 +255,24 @@ static int sf_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
     struct sf_node *node;
     struct sf_nodelist_item *item;
 
+    ret = 0;
+
     sf_log_debug("sf_readdir(path=%s, offset=%lu)\n", path, offset);
+
+    if (strlen(path) > PATH_MAX) {
+        ret = -ENAMETOOLONG;
+        goto err;
+    }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_readdir(path=%s, offset=%lu): %s\n", path, offset, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
-    ret = 0;
+    node->st->st_atime = time(NULL);
 
     item = node->nodelist;
 
@@ -243,101 +283,123 @@ static int sf_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
         memcpy(&st, item->node->st, sizeof(struct stat));
 
         if (filler(buf, item->node->name, &st, 0) != 0) {
-            pthread_mutex_unlock(&lock_node);
-
-            sf_log_error("sf_readdir(path=%s, offset=%lu): %s\n", path, offset, strerror(ENOMEM));
             ret = -ENOMEM;
-            break;
+            goto err_unlock;
         }
 
         item = item->next;
     }
-
-    node->st->st_atime = time(NULL);
     pthread_mutex_unlock(&lock_node);
 
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_readdir(path=%s, offset=%lu): %s\n", path, offset, strerror(-ret));
     return ret;
 }
 
 static int sf_opendir(const char *path, struct fuse_file_info *fi)
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_opendir(path=%s)\n", path);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_opendir(path=%s): %s\n", path, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_opendir(path=%s): %s\n", path, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     // TODO: check permissions (open flags in `fi`)
     node->st->st_atime = time(NULL);
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_opendir(path=%s): %s\n", path, strerror(-ret));
+    return ret;
 }
 
 static int sf_releasedir(const char *path, struct fuse_file_info *fi)
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_releasedir(path=%s)\n", path);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_releasedir(path=%s): %s\n", path, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_releasedir(path=%s): %s\n", path, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_releasedir(path=%s): %s\n", path, strerror(-ret));
+    return ret;
 }
 
 static int sf_rmdir(const char *path)
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_rmdir(path=%s)\n", path);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_rmdir(path=%s): %s\n", path, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_rmdir(path=%s): %s\n", path, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     sf_node_remove(node);
     sf_node_destroy(node);
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_rmdir(path=%s): %s\n", path, strerror(-ret));
+    return ret;
 }
 
 static int sf_mknod(const char *path, mode_t mode, dev_t dev)
@@ -346,28 +408,26 @@ static int sf_mknod(const char *path, mode_t mode, dev_t dev)
     char *name;
     struct sf_node *parent, *node;
 
+    ret = 0;
+
     sf_log_debug("sf_mknod(path=%s, mode=%u, dev=%u)\n", path, mode, dev);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_mknod(path=%s, mode=%u, dev=%u): %s\n", path, mode, dev, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     if (sf_node_find(path) != NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_mknod(path=%s, mode=%u, dev=%u): %s\n", path, mode, dev, strerror(EEXIST));
-        return -EEXIST;
+        ret = -EEXIST;
+        goto err_unlock;
     }
 
     parent = sf_node_find_parent(path);
 
     if (parent == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_mknod(path=%s, mode=%u, dev=%u): %s\n", path, mode, dev, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     name = sf_get_filename(path);
@@ -377,10 +437,8 @@ static int sf_mknod(const char *path, mode_t mode, dev_t dev)
     free(name);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_mknod(path=%s, mode=%u, dev=%u): %s\n", path, mode, dev, strerror(errno));
-        return -errno;
+        ret = -errno;
+        goto err_unlock;
     }
 
     ret = sf_node_add(parent, node);
@@ -388,40 +446,51 @@ static int sf_mknod(const char *path, mode_t mode, dev_t dev)
 
     if (ret < 0) {
         sf_node_destroy(node);
-
-        sf_log_error("sf_mknod(path=%s, mode=%u, dev=%u): %s\n", path, mode, dev, strerror(-ret));
-        return ret;
+        goto err;
     }
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_mknod(path=%s, mode=%u, dev=%u): %s\n", path, mode, dev, strerror(-ret));
+    return ret;
 }
 
 static int sf_open(const char *path, struct fuse_file_info *fi)
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_open(path=%s)\n", path);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_open(path=%s): %s\n", path, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_open(path=%s): %s\n", path, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     // TODO: check permissions
     node->st->st_atime = time(NULL);
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_open(path=%s): %s\n", path, strerror(-ret));
+    return ret;
 }
 
 static int sf_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
@@ -429,16 +498,21 @@ static int sf_read(const char *path, char *buf, size_t size, off_t offset, struc
     int ret;
     struct sf_node *node;
 
+    ret = 0;
+
     sf_log_debug("sf_read(path=%s, size=%lu, offset=%lu)\n", path, size, offset);
+
+    if (strlen(path) > PATH_MAX) {
+        ret = -ENAMETOOLONG;
+        goto err;
+    }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_read(path=%s, size=%lu, offset=%lu): %s\n", path, size, offset, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     ret = (int) sf_node_read(buf, size, offset, node);
@@ -446,11 +520,15 @@ static int sf_read(const char *path, char *buf, size_t size, off_t offset, struc
     node->st->st_atime = time(NULL);
     pthread_mutex_unlock(&lock_node);
 
-    if (ret < 0) {
-        sf_log_error("sf_read(path=%s, size=%lu, offset=%lu): %s\n", path, size, offset, strerror(-ret));
-        return ret;
-    }
+    if (ret < 0)
+        goto err;
 
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_read(path=%s, size=%lu, offset=%lu): %s\n", path, size, offset, strerror(-ret));
     return ret;
 }
 
@@ -459,21 +537,26 @@ static int sf_write(const char *path, const char *buf, size_t size, off_t offset
     int ret;
     struct sf_node *node;
 
+    ret = 0;
+
     sf_log_debug("sf_write(path=%s, size=%lu, offset=%lu)\n", path, size, offset);
 
+    if (strlen(path) > PATH_MAX) {
+        ret = -ENAMETOOLONG;
+        goto err;
+    }
+
     if (!sf_has_availspace(size)) {
-        sf_log_error("sf_write(path=%s, size=%lu, offset=%lu): %s\n", path, size, offset, strerror(ENOSPC));
-        return -ENOSPC;
+        ret = -ENOSPC;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_write(path=%s, size=%lu, offset=%lu): %s\n", path, size, offset, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     ret = (int) sf_node_write(buf, size, offset, node);
@@ -481,11 +564,15 @@ static int sf_write(const char *path, const char *buf, size_t size, off_t offset
     node->st->st_mtime = time(NULL);
     pthread_mutex_unlock(&lock_node);
 
-    if (ret < 0) {
-        sf_log_error("sf_write(path=%s, size=%lu, offset=%lu): %s\n", path, size, offset, strerror(-ret));
-        return ret;
-    }
+    if (ret < 0)
+        goto err;
 
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_write(path=%s, size=%lu, offset=%lu): %s\n", path, size, offset, strerror(-ret));
     return ret;
 }
 
@@ -495,33 +582,26 @@ static int sf_truncate(const char *path, off_t size)
     time_t t;
     struct sf_node *node;
 
+    ret = 0;
+
     sf_log_debug("sf_truncate(path=%s, size=%lu)\n", path, size);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_truncate(path=%s, size=%lu): %s\n", path, size, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
-    }
-
-    if (size < 0) {
-        sf_log_error("sf_truncate(path=%s, size=%lu): %s\n", path, size, strerror(EINVAL));
-        return -EINVAL;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_truncate(path=%s, size=%lu): %s\n", path, size, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     if (S_ISDIR(node->st->st_mode)) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_truncate(path=%s, size=%lu): %s\n", path, size, strerror(EISDIR));
-        return -EISDIR;
+        ret = -EISDIR;
+        goto err_unlock;
     }
 
     ret = (int) sf_node_resize(node, size);
@@ -532,40 +612,45 @@ static int sf_truncate(const char *path, off_t size)
     node->st->st_ctime = t;
     pthread_mutex_unlock(&lock_node);
 
-    if (ret < 0) {
-        sf_log_error("sf_truncate(path=%s, size=%lu): %s\n", path, size, strerror(-ret));
-        return ret;
-    }
+    if (ret < 0)
+        goto err;
 
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_truncate(path=%s, size=%lu): %s\n", path, size, strerror(-ret));
     return ret;
 }
 
 static int sf_rename(const char *path, const char *newpath)
 {
-    int ret;
+    int ret, created;
     time_t t;
     char *name;
     struct sf_node *oldnode, *newnode, *oldparent, *newparent;
     struct sf_blocklist_item *item;
 
-    sf_log_error("sf_rename(path=%s, newpath=%s)\n", path, newpath);
+    ret = 0;
+    created = 0;
+
+    sf_log_debug("sf_rename(path=%s, newpath=%s)\n", path, newpath);
 
     if (strlen(path) > PATH_MAX || strlen(newpath) > PATH_MAX) {
-        sf_log_error("sf_rename(path=%s, newpath=%s): %s\n", path, newpath, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     if (strcmp(path, newpath) == 0)
-        return 0;
+        return ret;
 
     pthread_mutex_lock(&lock_node);
     oldnode = sf_node_find(path);
 
     if (oldnode == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_rename(path=%s, newpath=%s): %s\n", path, newpath, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     oldparent = oldnode->parent;
@@ -576,10 +661,8 @@ static int sf_rename(const char *path, const char *newpath)
         newparent = sf_node_find_parent(newpath);
 
         if (newparent == NULL) {
-            pthread_mutex_unlock(&lock_node);
-
-            sf_log_error("sf_rename(path=%s, newpath=%s): %s\n", path, newpath, strerror(ENOENT));
-            return -ENOENT;
+            ret = -ENOENT;
+            goto err_unlock;
         }
     } else {
         newparent = newnode->parent;
@@ -587,6 +670,7 @@ static int sf_rename(const char *path, const char *newpath)
 
     t = time(NULL);
 
+    // TODO: consider links, pipes etc
     if (S_ISDIR(oldnode->st->st_mode) || S_ISREG(oldnode->st->st_mode)) {
         if (newnode == NULL) {
             name = sf_get_filename(newpath);
@@ -596,42 +680,30 @@ static int sf_rename(const char *path, const char *newpath)
             free(name);
 
             if (newnode == NULL) {
-                pthread_mutex_unlock(&lock_node);
-
-                sf_node_destroy(newnode);
-
-                sf_log_error("sf_rename(path=%s, newpath=%s): %s\n", path, newpath, strerror(errno));
-                return -errno;
+                ret = -errno;
+                goto err_unlock;
             }
+
+            created = 1;
         }
 
         if (S_ISDIR(oldnode->st->st_mode)) {
             if (S_ISDIR(newnode->st->st_mode)) {
                 if (newnode->nodelist != NULL) {
-                    pthread_mutex_unlock(&lock_node);
-
-                    sf_log_error("sf_rename(path=%s, newpath=%s): %s\n", path, newpath, strerror(ENOTEMPTY));
-                    return -ENOTEMPTY;
+                    ret = -ENOTEMPTY;
+                    goto err_unlock;
                 }
             } else {
-                pthread_mutex_unlock(&lock_node);
-
-                // TODO: consider links, pipes etc
-
-                sf_log_error("sf_rename(path=%s, newpath=%s): %s\n", path, newpath, strerror(ENOTDIR));
-                return -ENOTDIR;
+                ret = -ENOTDIR;
+                goto err_unlock;
             }
 
             newnode->st->st_mtime = t;
             newnode->st->st_ctime = t;
         } else if (S_ISREG(oldnode->st->st_mode)) {
             if (!S_ISREG(newnode->st->st_mode)) {
-                pthread_mutex_unlock(&lock_node);
-
-                // TODO: consider links, pipes etc
-
-                sf_log_error("sf_rename(path=%s, newpath=%s): %s\n", path, newpath, strerror(EISDIR));
-                return -EISDIR;
+                ret = -EISDIR;
+                goto err_unlock;
             }
 
             item = newnode->blocklist;
@@ -644,24 +716,14 @@ static int sf_rename(const char *path, const char *newpath)
             newnode->st->st_ctime = t;
         }
     } else {
-        pthread_mutex_unlock(&lock_node);
-
-        // TODO: use correct errno
-
-        sf_log_error("Invalid file type\n");
-        return -1;
+        ret = -ENOTSUP;
+        goto err_unlock;
     }
 
     ret = sf_node_add(newparent, newnode);
 
-    if (ret < 0) {
-        pthread_mutex_unlock(&lock_node);
-
-        //sf_node_destroy(newnode);
-
-        sf_log_error("sf_rename(path=%s, newpath=%s): %s\n", path, newpath, strerror(-ret));
-        return ret;
-    }
+    if (ret < 0)
+        goto err_unlock;
 
     sf_node_remove(oldnode);
     sf_node_destroy(oldnode);
@@ -673,77 +735,106 @@ static int sf_rename(const char *path, const char *newpath)
     newparent->st->st_ctime = t;
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+
+    if (created)
+        free(newnode);
+err:
+    sf_log_error("sf_rename(path=%s, newpath=%s): %s\n", path, newpath, strerror(-ret));
+    return ret;
 }
 
 static int sf_release(const char *path, struct fuse_file_info *fi)
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_release(path=%s)\n", path);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_release(path=%s): %s\n", path, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_release(path=%s): %s\n", path, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_release(path=%s): %s\n", path, strerror(-ret));
+    return ret;
 }
 
 static int sf_unlink(const char *path)
 {
+    int ret;
     struct sf_node *node;
+
+    ret = 0;
 
     sf_log_debug("sf_unlink(path=%s)\n", path);
 
     if (strlen(path) > PATH_MAX) {
-        sf_log_error("sf_unlink(path=%s): %s\n", path, strerror(ENAMETOOLONG));
-        return -ENAMETOOLONG;
+        ret = -ENAMETOOLONG;
+        goto err;
     }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_unlink(path=%s): %s\n", path, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     sf_node_remove(node);
     sf_node_destroy(node);
     pthread_mutex_unlock(&lock_node);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_unlink(path=%s): %s\n", path, strerror(-ret));
+    return ret;
 }
 
 static int sf_statfs(const char *path, struct statvfs *stbuf)
 {
+    int ret;
     struct sf_node *node;
     struct statvfs *st;
 
+    ret = 0;
+
     sf_log_debug("sf_statfs(path=%s)\n", path);
+
+    if (strlen(path) > PATH_MAX) {
+        ret = -ENAMETOOLONG;
+        goto err;
+    }
 
     pthread_mutex_lock(&lock_node);
     node = sf_node_find(path);
 
     if (node == NULL) {
-        pthread_mutex_unlock(&lock_node);
-
-        sf_log_error("sf_statfs(path=%s): %s\n", path, strerror(ENOENT));
-        return -ENOENT;
+        ret = -ENOENT;
+        goto err_unlock;
     }
 
     st = sf_get_statfs();
@@ -752,7 +843,13 @@ static int sf_statfs(const char *path, struct statvfs *stbuf)
 
     free(st);
 
-    return 0;
+    return ret;
+
+err_unlock:
+    pthread_mutex_unlock(&lock_node);
+err:
+    sf_log_error("sf_release(path=%s): %s\n", path, strerror(-ret));
+    return ret;
 }
 
 int main(int argc, char** argv)
@@ -768,16 +865,16 @@ int main(int argc, char** argv)
         .mkdir = sf_mkdir,
         .readdir = sf_readdir,
         .opendir = sf_opendir,
-        .releasedir = sf_releasedir,
         .rmdir = sf_rmdir,
+        .releasedir = sf_releasedir,
         .mknod = sf_mknod,
         .open = sf_open,
         .read = sf_read,
         .write = sf_write,
         .truncate = sf_truncate,
         .rename = sf_rename,
-        .release = sf_release,
         .unlink = sf_unlink,
+        .release = sf_release,
         .statfs = sf_statfs,
     };
 
