@@ -66,9 +66,9 @@ ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node
 
 ssize_t sf_node_resize(struct sf_node *node, size_t size);
 
-int sf_node_remove(struct sf_nodelist_item *item);
+void sf_node_remove(struct sf_node *node);
 
-int sf_node_destroy(struct sf_node *node);
+void sf_node_destroy(struct sf_node *node);
 
 struct sf_tablelist_item *sf_table_get(ino_t ino);
 
@@ -84,6 +84,6 @@ int sf_has_availspace(size_t size);
 
 int sf_init(const char *imgname);
 
-int sf_destroy();
+void sf_destroy();
 
 #endif // SFFS_H
