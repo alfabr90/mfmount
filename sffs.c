@@ -145,81 +145,6 @@ static void sf_addr_free(size_t addr)
     pthread_mutex_unlock(&lock_stat);
 }
 
-static struct stat *sf_stat_create(mode_t mode)
-{
-    ino_t ino;
-    time_t t;
-    struct stat *st;
-
-    sf_log_debug("sf_stat_create(mode=%u)\n", mode);
-
-    st = malloc(sizeof(struct stat));
-
-    if (st == NULL) {
-        sf_log_fatal("Could not allocate stat: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
-
-    t = time(NULL);
-
-    ino = sf_ino_get_free();
-
-    if (ino < 0) {
-        errno = ino;
-        return NULL;
-    }
-
-    st->st_ino = ino;
-    st->st_mode = mode;
-    st->st_uid = getuid();
-    st->st_gid = getgid();
-    st->st_atime = t;
-    st->st_mtime = t;
-    st->st_ctime = t;
-    st->st_size = 0;
-    st->st_blksize = sf_data->st->f_bsize;
-    st->st_blocks = 0;
-    st->st_dev = 0;
-    st->st_rdev = 0;
-    st->st_nlink = 0;
-
-    return st;
-}
-
-static struct sf_nodelist_item *sf_nodelist_item_find(struct sf_node *parent, const char *name)
-{
-    struct sf_nodelist_item *item;
-
-    sf_log_debug("sf_nodelist_item_find(parent=%p, name=%s)\n", parent, name);
-
-    item = parent->nodelist;
-
-    while (item != NULL && strcmp(item->node->name, name) != 0)
-        item = item->next;
-
-    return item;
-}
-
-static struct sf_nodelist_item *sf_nodelist_item_create(struct sf_node *node)
-{
-    struct sf_nodelist_item *item;
-
-    sf_log_debug("sf_nodelist_item_create(node=%p)\n", node);
-
-    item = malloc(sizeof(struct sf_nodelist_item));
-
-    if (item == NULL) {
-        sf_log_fatal("Could not allocate nodelist item for node with name \"%s\": %s\n", node->name, strerror(errno));
-        exit(EXIT_FAILURE);
-    }
-
-    item->node = node;
-    item->prev = NULL;
-    item->next = NULL;
-
-    return item;
-}
-
 static struct sf_blocklist_item *sf_blocklist_item_create(size_t addr)
 {
     struct sf_blocklist_item *item;
@@ -261,6 +186,172 @@ static void sf_blocklist_item_add(struct sf_node *node, struct sf_blocklist_item
     node->blocklist = item;
 }
 
+static struct stat *sf_stat_create(ino_t ino, mode_t mode)
+{
+    time_t t;
+    struct stat *st;
+
+    sf_log_debug("sf_stat_create(mode=%u)\n", mode);
+
+    st = malloc(sizeof(struct stat));
+
+    if (st == NULL) {
+        sf_log_fatal("Could not allocate stat: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    t = time(NULL);
+
+    st->st_ino = ino;
+    st->st_mode = mode;
+    st->st_uid = getuid();
+    st->st_gid = getgid();
+    st->st_atime = t;
+    st->st_mtime = t;
+    st->st_ctime = t;
+    st->st_size = 0;
+    st->st_blksize = sf_data->st->f_bsize;
+    st->st_blocks = 0;
+    st->st_dev = 0;
+    st->st_rdev = 0;
+    st->st_nlink = 0;
+
+    return st;
+}
+
+static struct sf_node *sf_node_create(ino_t ino, mode_t mode)
+{
+    struct stat *st;
+    struct sf_node *node;
+
+    sf_log_debug("sf_node_create(ino=%lu, mode=%u)\n", ino, mode);
+
+    node = malloc(sizeof(struct sf_node));
+
+    if (node == NULL) {
+        sf_log_fatal("Could not allocate node with number \"%lu\": %s\n", ino, strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    st = sf_stat_create(ino, mode);
+
+    if (st == NULL)
+        return NULL;
+
+    node->st = st;
+    node->blocklist = NULL;
+
+    return node;
+}
+
+static void sf_node_destroy(struct sf_node *node)
+{
+    struct sf_blocklist_item *curblock, *nextblock;
+
+    curblock = node->blocklist;
+
+    while (curblock != NULL) {
+        nextblock = curblock->next;
+        sf_addr_free(curblock->addr);
+        free(curblock);
+        curblock = nextblock;
+    }
+
+    sf_ino_free(node->st->st_ino);
+
+    free(node->st);
+    free(node);
+}
+
+static struct sf_nodelist_item *sf_nodelist_item_create(struct sf_node *node)
+{
+    struct sf_nodelist_item *item;
+
+    sf_log_debug("sf_nodelist_item_create(node=%p)\n", node);
+
+    item = malloc(sizeof(struct sf_nodelist_item));
+
+    if (item == NULL) {
+        sf_log_fatal("Could not allocate nodelist item for node with number \"%lu\": %s\n", node->st->st_ino, strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    item->node = node;
+    item->prev = NULL;
+    item->next = NULL;
+
+    return item;
+}
+
+static struct sf_file *sf_file_create(const char *name, struct sf_file *parent)
+{
+    ino_t ino;
+    struct sf_file *file;
+
+    sf_log_debug("sf_file_create(name=%s, parent=%p)\n", name, parent);
+
+    file = malloc(sizeof(struct sf_file));
+
+    if (file == NULL) {
+        sf_log_fatal("Could not allocate file with name \"%s\": %s\n", name, strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    ino = sf_ino_get_free();
+
+    if (ino < 0) {
+        errno = -ino;
+        return NULL;
+    }
+
+    file->name = strdup(name);
+    file->ino = ino;
+    file->parent = parent;
+    file->filelist = NULL;
+
+    return file;
+}
+
+static struct sf_filelist_item *sf_filelist_item_find(struct sf_file *current, const char *name)
+{
+    struct sf_filelist_item *item;
+
+    sf_log_debug("sf_filelist_item_find(current=%p, name=%s)\n", current, name);
+
+    item = current->filelist;
+
+    while (item != NULL && strcmp(item->file->name, name) != 0)
+        item = item->next;
+
+    return item;
+}
+
+static struct sf_filelist_item *sf_filelist_item_create(struct sf_file *file)
+{
+    struct sf_filelist_item *item;
+
+    sf_log_debug("sf_filelist_item_create(file=%p)\n", file);
+
+    item = malloc(sizeof(struct sf_filelist_item));
+
+    if (item == NULL) {
+        sf_log_fatal("Could not allocate filelist item for file with name \"%s\": %s\n", file->name, strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    item->file = file;
+    item->prev = NULL;
+    item->next = NULL;
+
+    return item;
+}
+
+static void sf_file_destroy(struct sf_file *file)
+{
+    free(file->name);
+    free(file);
+}
+
 char *sf_get_filename(const char *path)
 {
     char *dup, *saveptr, *name, *tmp;
@@ -281,57 +372,57 @@ char *sf_get_filename(const char *path)
     return name;
 }
 
-struct sf_node *sf_node_find(const char *path)
+struct sf_file *sf_file_find(const char *path)
 {
     char *dup, *saveptr, *name;
-    struct sf_node *node;
-    struct sf_nodelist_item *item;
+    struct sf_file *file;
+    struct sf_filelist_item *item;
 
-    sf_log_debug("sf_node_find(path=%s)\n", path);
+    sf_log_debug("sf_file_find(path=%s)\n", path);
 
-    node = sf_data->rootnode;
+    file = sf_data->filelist->file;
 
-    // TODO: improve search of node (e.g., using a hashtree, as ext4 does?)
+    // TODO: improve search of file (e.g., using a hashtree, as ext4 does?)
     dup = strdup(path);
     name = strtok_r(dup, DIR_DELIMITER, &saveptr);
 
     while (name != NULL) {
-        item = sf_nodelist_item_find(node, name);
+        item = sf_filelist_item_find(file, name);
 
         if (item == NULL) {
-            node = NULL;
+            file = NULL;
             break;
         }
 
-        node = item->node;
+        file = item->file;
         name = strtok_r(NULL, DIR_DELIMITER, &saveptr);
     }
 
     free(dup);
 
-    return node;
+    return file;
 }
 
-struct sf_node *sf_node_find_parent(const char *path)
+struct sf_file *sf_file_find_parent(const char *path)
 {
     char *dup, *saveptr, *name;
-    struct sf_node *parent;
-    struct sf_nodelist_item *item;
+    struct sf_file *parent;
+    struct sf_filelist_item *item;
 
-    sf_log_debug("sf_node_find_parent(path=%s)\n", path);
+    sf_log_debug("sf_file_find_parent(path=%s)\n", path);
 
-    parent = sf_data->rootnode;
+    parent = sf_data->filelist->file;
 
     dup = strdup(path);
     name = strtok_r(dup, DIR_DELIMITER, &saveptr);
 
     while (name != NULL) {
-        item = sf_nodelist_item_find(parent, name);
+        item = sf_filelist_item_find(parent, name);
 
         if (item == NULL)
             break;
 
-        parent = item->node;
+        parent = item->file;
         name = strtok_r(NULL, DIR_DELIMITER, &saveptr);
     }
 
@@ -344,56 +435,109 @@ struct sf_node *sf_node_find_parent(const char *path)
     return parent;
 }
 
-struct sf_node *sf_node_create(const char *name, mode_t mode, struct sf_node *parent)
-{
-    struct stat *st;
-    struct sf_node *node;
-
-    sf_log_debug("sf_node_create(name=%s, mode=%u, parent=%p)\n", name, mode, parent);
-
-    node = malloc(sizeof(struct sf_node));
-
-    if (node == NULL) {
-        sf_log_fatal("Could not allocate node with name \"%s\": %s\n", name, strerror(errno));
-        exit(EXIT_FAILURE);
-    }
-
-    st = sf_stat_create(mode);
-
-    if (st == NULL)
-        return NULL;
-
-    node->name = strdup(name);
-    node->st = st;
-    node->parent = parent;
-    node->nodelist = NULL;
-    node->blocklist = NULL;
-
-    return node;
-}
-
-int sf_node_add(struct sf_node *parent, struct sf_node *node)
+int sf_file_add(struct sf_file *parent, const char *name)
 {
     int ret;
-    struct sf_nodelist_item *item, *tmp;
+    struct sf_file *file;
+    struct sf_filelist_item *item, *tmp;
 
     ret = 0;
 
-    sf_log_debug("sf_node_add(parent=%p, node=%p)\n", parent, node);
+    sf_log_debug("sf_file_add(parent=%p, name=%s)\n", parent, name);
 
-    item = sf_nodelist_item_create(node);
+    file = sf_file_create(name, parent);
 
-    if (item == NULL)
+    if (file == NULL)
         return -errno;
 
-    tmp = parent->nodelist;
-    parent->nodelist = item;
+    item = sf_filelist_item_create(file);
+
+    if (item == NULL) {
+        sf_file_destroy(file);
+        return -errno;
+    }
+
+    tmp = parent->filelist;
+    parent->filelist = item;
     item->next = tmp;
 
     if (tmp != NULL)
         tmp->prev = item;
 
     return ret;
+}
+
+void sf_file_remove(struct sf_file *file)
+{
+    struct sf_filelist_item *item;
+
+    sf_log_debug("sf_file_remove(file=%p)\n", file);
+
+    item = file->parent->filelist;
+
+    if (item->file == file)
+        file->parent->filelist = item->next;
+
+    while (item->file != file)
+        item = item->next;
+
+    if (item->prev != NULL)
+        item->prev->next = item->next;
+
+    if (item->next != NULL)
+        item->next->prev = item->prev;
+
+    sf_file_destroy(file);
+    free(item);
+}
+
+struct sf_node *sf_node_get(ino_t ino)
+{
+    struct sf_nodelist_item *item;
+
+    sf_log_debug("sf_node_get(ino=%lu)\n", ino);
+
+    item = sf_data->nodetbl[ino % INO_TBL_SIZE];
+
+    while (item != NULL && item->node->st->st_ino != ino)
+        item = item->next;
+
+    if (item == NULL)
+        return NULL;
+
+    return item->node;
+}
+
+int sf_node_put(ino_t ino, mode_t mode)
+{
+    ino_t pos;
+    struct sf_node *node;
+    struct sf_nodelist_item *item, *tmp;
+
+    sf_log_debug("sf_node_put(ino=%lu, mode=%u)\n", ino, mode);
+
+    node = sf_node_create(ino, mode);
+
+    if (node == NULL) {
+        sf_ino_free(ino);
+        return -errno;
+    }
+
+    item = sf_nodelist_item_create(node);
+
+    if (item == NULL)
+        return -errno;
+
+    pos = node->st->st_ino % INO_TBL_SIZE;
+
+    tmp = sf_data->nodetbl[pos];
+    sf_data->nodetbl[pos] = item;
+    item->next = tmp;
+
+    if (tmp != NULL)
+        tmp->prev = item;
+
+    return 0;
 }
 
 ssize_t sf_node_read(char *buf, size_t size, off_t offset, struct sf_node *node)
@@ -469,9 +613,15 @@ ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node
                 return addr;
 
             item = sf_blocklist_item_create(addr);
+
+            if (item == NULL) {
+                b_written = -EIO;
+                break;
+            }
+
             sf_blocklist_item_add(node, item);
 
-            node->st->st_blocks += BLOCK_SIZE / 512;
+            node->st->st_blocks += blksize / 512;
         }
 
         // TODO: improve seeking of file's starting writing position
@@ -503,12 +653,15 @@ ssize_t sf_node_resize(struct sf_node *node, size_t size)
     int i;
     size_t diff;
     ssize_t ret;
+    fsblkcnt_t blksize;
     char *buf;
     struct sf_blocklist_item *curblock, *nextblock;
 
     sf_log_debug("sf_node_resize(node=%p, size=%lu)\n", node, size);
 
     ret = 0;
+
+    blksize = sf_data->st->f_bsize;
 
     if (node->st->st_size != size) {
         if (node->st->st_size < size) {
@@ -529,12 +682,12 @@ ssize_t sf_node_resize(struct sf_node *node, size_t size)
             diff = 0;
             buf = NULL;
 
-            ret = size / BLOCK_SIZE;
+            ret = size / blksize;
 
-            if (size % BLOCK_SIZE) {
+            if (size % blksize) {
                 ret++;
 
-                diff = BLOCK_SIZE - (size % BLOCK_SIZE);
+                diff = blksize - (size % blksize);
 
                 buf = calloc(diff, sizeof(char));
 
@@ -557,7 +710,7 @@ ssize_t sf_node_resize(struct sf_node *node, size_t size)
             }
 
             if (diff > 0)
-                ret = sf_node_write(buf, diff, ret * BLOCK_SIZE - diff, node);
+                ret = sf_node_write(buf, diff, ret * blksize - diff, node);
         }
 
         if (ret < 0)
@@ -571,14 +724,17 @@ ssize_t sf_node_resize(struct sf_node *node, size_t size)
 
 void sf_node_remove(struct sf_node *node)
 {
+    ino_t pos;
     struct sf_nodelist_item *item;
 
     sf_log_debug("sf_node_remove(node=%p)\n", node);
 
-    item = node->parent->nodelist;
+    pos = node->st->st_ino % INO_TBL_SIZE;
+
+    item = sf_data->nodetbl[pos];
 
     if (item->node == node)
-        node->parent->nodelist = item->next;
+        sf_data->nodetbl[pos] = item->next;
 
     while (item->node != node)
         item = item->next;
@@ -589,36 +745,8 @@ void sf_node_remove(struct sf_node *node)
     if (item->next != NULL)
         item->next->prev = item->prev;
 
+    sf_node_destroy(node);
     free(item);
-}
-
-void sf_node_destroy(struct sf_node *node)
-{
-    struct sf_blocklist_item *curblock, *nextblock;
-
-    sf_log_debug("sf_node_destroy(node=%p)\n", node);
-
-    curblock = node->blocklist;
-
-    while (curblock != NULL) {
-        nextblock = curblock->next;
-        sf_addr_free(curblock->addr);
-        free(curblock);
-        curblock = nextblock;
-    }
-
-    sf_ino_free(node->st->st_ino);
-
-    free(node->name);
-    free(node->st);
-    free(node);
-}
-
-struct sf_state *sf_get_state()
-{
-    sf_log_debug("sf_get_state()\n");
-
-    return sf_data;
 }
 
 struct statvfs *sf_get_statfs()
@@ -644,15 +772,17 @@ struct statvfs *sf_get_statfs()
 int sf_has_availspace(size_t size)
 {
     int ret;
-    fsblkcnt_t blocks;
+    fsblkcnt_t blocks, blksize;
 
     ret = 0;
 
     sf_log_debug("sf_has_availspace(size=%lu)\n", size);
 
-    blocks = size / BLOCK_SIZE;
+    blksize = sf_data->st->f_bsize;
 
-    if (size % BLOCK_SIZE)
+    blocks = size / blksize;
+
+    if (size % blksize)
         blocks++;
 
     pthread_mutex_lock(&lock_stat);
@@ -667,12 +797,13 @@ int sf_init(const char *filename)
     int ret;
     fsblkcnt_t size;
     const char *rootname = "";
+    struct sf_file *rootfile;
 
     ret = 0;
 
     sf_log_debug("sf_init(filename=%s)\n", filename);
 
-    if (sf_get_state() != NULL)
+    if (sf_data != NULL)
         return ret;
 
     sf_data = malloc(sizeof(struct sf_state));
@@ -707,6 +838,13 @@ int sf_init(const char *filename)
         exit(EXIT_FAILURE);
     }
 
+    sf_data->nodetbl = calloc(INO_TBL_SIZE, sizeof(struct sf_nodelist_item **));
+
+    if (sf_data->nodetbl == NULL) {
+        sf_log_fatal("Could not allocate file system nodes table: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
     sf_data->st = malloc(sizeof(struct statvfs));
 
     if (sf_data->st == NULL) {
@@ -726,12 +864,24 @@ int sf_init(const char *filename)
     sf_data->st->f_flag = 0;
     sf_data->st->f_namemax = NAME_MAX;
 
-    sf_data->rootnode = sf_node_create(rootname, S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO, NULL);
+    rootfile = sf_file_create(rootname, NULL);
 
-    if (sf_data->rootnode == NULL) {
+    if (rootfile == NULL) {
         ret = -errno;
         goto err;
     }
+
+    sf_data->filelist = sf_filelist_item_create(rootfile);
+
+    if (sf_data->filelist == NULL) {
+        ret = -errno;
+        goto err;
+    }
+
+    ret = sf_node_put(rootfile->ino, S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO);
+
+    if (ret < 0)
+        goto err;
 
     ret = pthread_mutex_init(&lock_ino, NULL);
 
@@ -757,17 +907,32 @@ err:
 
 void sf_destroy()
 {
+    int i;
+    struct sf_nodelist_item *curitem, *nextitem;
+
     sf_log_debug("sf_destroy()\n");
 
-    free(sf_data->inomap);
-    free(sf_data->addrmap);
-    free(sf_data->st);
+    for (i = 0; i < INO_TBL_SIZE; i++) {
+        curitem = sf_data->nodetbl[i];
 
-    if (sf_data->rootnode != NULL)
-        sf_node_destroy(sf_data->rootnode);
+        while (curitem != NULL) {
+            nextitem = curitem->next;
+            sf_node_remove(curitem->node);
+            curitem = nextitem;
+        }
+    }
+
+    if (sf_data->filelist != NULL)
+        sf_file_remove(sf_data->filelist->file);
 
     if (sf_data->fh != NULL)
         fclose(sf_data->fh);
+
+    free(sf_data->inomap);
+    free(sf_data->addrmap);
+    //free(sf_data->filelist);
+    free(sf_data->nodetbl);
+    free(sf_data->st);
 
     pthread_mutex_destroy(&lock_ino);
     pthread_mutex_destroy(&lock_addr);
