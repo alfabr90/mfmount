@@ -1,16 +1,50 @@
 #include "log.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 static int log_level = LOG_ERROR;
 static FILE *log_fh;
 
+static char *sf_log_gettime()
+{
+    size_t len;
+    struct timespec ts;
+    struct tm brokendown;
+    char *time_str, *nano_str;
+
+    if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
+        return NULL;
+
+    localtime_r(&(ts.tv_sec), &brokendown);
+
+    len = 24; // "YYYY-MM-DD HH:MM:SS,000\0"
+
+    time_str = malloc(len * sizeof(char));
+
+    if (time_str == NULL)
+        return NULL;
+
+    strftime(time_str, (len - 4) * sizeof(char), "%F %T", &brokendown); // "YYYY-MM-DD HH:MM:SS\0"
+
+    nano_str = time_str + 19;
+
+    sprintf(nano_str, ",%03d", (int) (ts.tv_nsec / 1000000));
+
+    time_str[len - 1] = '\0';
+
+    return time_str;
+}
+
 static int sf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
 {
     int p;
+    size_t level_len, time_len, fmt_len;
+    char *log_msg, *log_level_str, *log_time, *tmp;
 
     if (fh == NULL)
         return 0;
@@ -25,26 +59,51 @@ static int sf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
 
     switch (level) {
     case LOG_DEBUG:
-        p = fprintf(fh, "DEBUG:");
+        log_level_str = LOG_DEBUG_STR;
         break;
     case LOG_INFO:
-        p = fprintf(fh, "INFO:");
+        log_level_str = LOG_INFO_STR;
         break;
     case LOG_WARN:
-        p = fprintf(fh, "WARN:");
+        log_level_str = LOG_WARN_STR;
         break;
     case LOG_ERROR:
-        p = fprintf(fh, "ERROR:");
+        log_level_str = LOG_ERROR_STR;
         break;
     case LOG_FATAL:
-        p = fprintf(fh, "FATAL:");
+        log_level_str = LOG_FATAL_STR;
         break;
     default:
-        break;
+        return -EINVAL;
     }
 
-    p += vfprintf(fh, fmt, ap);
+    log_time = sf_log_gettime();
+
+    level_len = strlen(log_level_str);
+    time_len = strlen(log_time);
+    fmt_len = strlen(fmt);
+
+    log_msg = malloc((level_len + 1 + time_len + 1 + fmt_len + 1) * sizeof(char));
+
+    if (log_msg == NULL)
+        return -errno;
+
+    tmp = log_msg;
+    strcpy(tmp, log_level_str);
+    tmp += level_len;
+    strcat(tmp, ":");
+    tmp++;
+    strcat(tmp, log_time);
+    tmp += time_len;
+    strcat(tmp, ":");
+    tmp++;
+    strcat(tmp, fmt);
+
+    p += vfprintf(fh, log_msg, ap);
     fflush(fh);
+
+    free(log_time);
+    free(log_msg);
 
     return p;
 }
