@@ -1,6 +1,7 @@
 #include "log.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
 #include <errno.h>
@@ -11,6 +12,7 @@ static FILE *log_fh;
 static int sf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
 {
     int p;
+    char *log_msg, *log_prefix;
 
     if (fh == NULL)
         return 0;
@@ -25,26 +27,36 @@ static int sf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
 
     switch (level) {
     case LOG_DEBUG:
-        p = fprintf(fh, "DEBUG:");
+        log_prefix = LOG_DEBUG_PREFIX;
         break;
     case LOG_INFO:
-        p = fprintf(fh, "INFO:");
+        log_prefix = LOG_INFO_PREFIX;
         break;
     case LOG_WARN:
-        p = fprintf(fh, "WARN:");
+        log_prefix = LOG_WARN_PREFIX;
         break;
     case LOG_ERROR:
-        p = fprintf(fh, "ERROR:");
+        log_prefix = LOG_ERROR_PREFIX;
         break;
     case LOG_FATAL:
-        p = fprintf(fh, "FATAL:");
+        log_prefix = LOG_FATAL_PREFIX;
         break;
     default:
-        break;
+        return -EINVAL;
     }
 
-    p += vfprintf(fh, fmt, ap);
+    log_msg = malloc((strlen(log_prefix) + strlen(fmt) + 1) * sizeof(char));
+
+    if (log_msg == NULL)
+        return -errno;
+
+    strcpy(log_msg, log_prefix);
+    strcat(log_msg, fmt);
+
+    p += vfprintf(fh, log_msg, ap);
     fflush(fh);
+
+    free(log_msg);
 
     return p;
 }
