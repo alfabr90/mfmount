@@ -10,11 +10,11 @@
 #define LOG_ERROR 3
 #define LOG_FATAL 4
 
-#define LOG_DEBUG_PREFIX "DEBUG:"
-#define LOG_INFO_PREFIX "INFO:"
-#define LOG_WARN_PREFIX "WARN:"
-#define LOG_ERROR_PREFIX "ERROR:"
-#define LOG_FATAL_PREFIX "FATAL:"
+#define LOG_DEBUG_STR "DEBUG"
+#define LOG_INFO_STR "INFO"
+#define LOG_WARN_STR "WARN"
+#define LOG_ERROR_STR "ERROR"
+#define LOG_FATAL_STR "FATAL"
 
 int sf_log(int level, const char *fmt, ...);
 
