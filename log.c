@@ -10,6 +10,25 @@
 static int log_level = LOG_ERROR;
 static FILE *log_fh;
 
+static char *sf_log_getlevel(int level)
+{
+    switch (level) {
+    case LOG_DEBUG:
+        return LOG_DEBUG_STR;
+    case LOG_INFO:
+        return LOG_INFO_STR;
+    case LOG_WARN:
+        return LOG_WARN_STR;
+    case LOG_ERROR:
+        return LOG_ERROR_STR;
+    case LOG_FATAL:
+        return LOG_FATAL_STR;
+    default:
+        errno = EINVAL;
+        return NULL;
+    }
+}
+
 static char *sf_log_gettime()
 {
     size_t len;
@@ -31,7 +50,7 @@ static char *sf_log_gettime()
 
     strftime(time_str, (len - 4) * sizeof(char), "%F %T", &brokendown); // "YYYY-MM-DD HH:MM:SS\0"
 
-    nano_str = time_str + 19;
+    nano_str = time_str + 19; // "YYYY-MM-DD HH:MM:SS\0"
 
     sprintf(nano_str, ",%03d", (int) (ts.tv_nsec / 1000000));
 
@@ -57,32 +76,21 @@ static int sf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
 
     p = 0;
 
-    switch (level) {
-    case LOG_DEBUG:
-        log_level_str = LOG_DEBUG_STR;
-        break;
-    case LOG_INFO:
-        log_level_str = LOG_INFO_STR;
-        break;
-    case LOG_WARN:
-        log_level_str = LOG_WARN_STR;
-        break;
-    case LOG_ERROR:
-        log_level_str = LOG_ERROR_STR;
-        break;
-    case LOG_FATAL:
-        log_level_str = LOG_FATAL_STR;
-        break;
-    default:
-        return -EINVAL;
-    }
+    log_level_str = sf_log_getlevel(level);
+
+    if (log_level_str == NULL)
+        return -errno;
 
     log_time = sf_log_gettime();
+
+    if (log_time == NULL)
+        return -errno;
 
     level_len = strlen(log_level_str);
     time_len = strlen(log_time);
     fmt_len = strlen(fmt);
 
+    // "<LEVEL>:<TIMESTAMP>:<FORMAT>\0"
     log_msg = malloc((level_len + 1 + time_len + 1 + fmt_len + 1) * sizeof(char));
 
     if (log_msg == NULL)
