@@ -14,8 +14,6 @@
 #include "util.h"
 #include "log.h"
 
-static const char *DIR_DELIMITER = "/";
-
 static pthread_mutex_t lock_ino;
 static pthread_mutex_t lock_addr;
 static pthread_mutex_t lock_stat;
@@ -374,29 +372,10 @@ static void sf_file_destroy(struct sf_file *file)
     free(file);
 }
 
-char *sf_get_filename(const char *path)
-{
-    char *dup, *saveptr, *name, *tmp;
-
-    sf_log_debug("sf_get_filename(path=%s)\n", path);
-
-    dup = strdup(path);
-    tmp = strtok_r(dup, DIR_DELIMITER, &saveptr);
-
-    do {
-        name = tmp;
-    } while ((tmp = strtok_r(NULL, DIR_DELIMITER, &saveptr)) != NULL);
-
-    name = strdup(name);
-
-    free(dup);
-
-    return name;
-}
-
 struct sf_file *sf_file_find(const char *path)
 {
     char *dup, *saveptr, *name;
+    const char *delim;
     struct sf_file *file;
     struct sf_filelist_item *item;
 
@@ -404,9 +383,11 @@ struct sf_file *sf_file_find(const char *path)
 
     file = sf_data->filelist->file;
 
+    delim = DIR_DELIMITER;
+
     // TODO: improve search of file (e.g., using a hashtree, as ext4 does?)
     dup = strdup(path);
-    name = strtok_r(dup, DIR_DELIMITER, &saveptr);
+    name = strtok_r(dup, delim, &saveptr);
 
     while (name != NULL) {
         item = sf_filelist_item_find(file, name);
@@ -417,7 +398,7 @@ struct sf_file *sf_file_find(const char *path)
         }
 
         file = item->file;
-        name = strtok_r(NULL, DIR_DELIMITER, &saveptr);
+        name = strtok_r(NULL, delim, &saveptr);
     }
 
     free(dup);
@@ -428,6 +409,7 @@ struct sf_file *sf_file_find(const char *path)
 struct sf_file *sf_file_find_parent(const char *path)
 {
     char *dup, *saveptr, *name;
+    const char *delim;
     struct sf_file *parent;
     struct sf_filelist_item *item;
 
@@ -435,8 +417,10 @@ struct sf_file *sf_file_find_parent(const char *path)
 
     parent = sf_data->filelist->file;
 
+    delim = DIR_DELIMITER;
+
     dup = strdup(path);
-    name = strtok_r(dup, DIR_DELIMITER, &saveptr);
+    name = strtok_r(dup, delim, &saveptr);
 
     while (name != NULL) {
         item = sf_filelist_item_find(parent, name);
@@ -445,7 +429,7 @@ struct sf_file *sf_file_find_parent(const char *path)
             break;
 
         parent = item->file;
-        name = strtok_r(NULL, DIR_DELIMITER, &saveptr);
+        name = strtok_r(NULL, delim, &saveptr);
     }
 
     if (name == NULL && parent->parent != NULL) {

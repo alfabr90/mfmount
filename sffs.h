@@ -15,6 +15,7 @@
 #define INO_TBL_SIZE 65599 // Prime number nearest 65536
 
 #define PATH_MAX 4096
+#define DIR_DELIMITER "/"
 
 #define NODE_LOCK_MODE_RD 0
 #define NODE_LOCK_MODE_WR 1
@@ -63,10 +64,6 @@ struct sf_state {
     struct sf_nodelist_item **nodetbl;
     FILE *fh;
 };
-
-// Helper functions
-
-char *sf_get_filename(const char *path);
 
 // File operations
 
