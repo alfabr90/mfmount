@@ -1,3 +1,5 @@
+#include "sffs.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,8 +11,8 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 
-#include "sffs.h"
 #include "log.h"
+#include "util.h"
 
 static const char *DIR_DELIMITER = "/";
 
@@ -19,11 +21,6 @@ static pthread_mutex_t lock_addr;
 static pthread_mutex_t lock_stat;
 
 static struct sf_state *sf_data;
-
-static size_t sf_util_min(size_t a, size_t b)
-{
-    return a < b ? a : b;
-}
 
 static ino_t sf_ino_get_free()
 {
