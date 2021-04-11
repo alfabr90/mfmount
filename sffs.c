@@ -17,6 +17,7 @@ static const char *DIR_DELIMITER = "/";
 static pthread_mutex_t lock_ino;
 static pthread_mutex_t lock_addr;
 static pthread_mutex_t lock_stat;
+static pthread_mutex_t lock_file;
 
 static struct sf_state *sf_data;
 
@@ -219,6 +220,29 @@ static struct stat *sf_stat_create(ino_t ino, mode_t mode)
     return st;
 }
 
+static void sf_node_destroy(struct sf_node *node)
+{
+    struct sf_blocklist_item *curblock, *nextblock;
+
+    curblock = node->blocklist;
+
+    while (curblock != NULL) {
+        nextblock = curblock->next;
+        sf_addr_free(curblock->addr);
+        free(curblock);
+        curblock = nextblock;
+    }
+
+    sf_ino_free(node->st->st_ino);
+
+    free(node->st);
+
+    pthread_mutex_destroy(&(node->lock));
+    pthread_cond_destroy(&(node->cond));
+
+    free(node);
+}
+
 static struct sf_node *sf_node_create(ino_t ino, mode_t mode)
 {
     struct stat *st;
@@ -239,28 +263,29 @@ static struct sf_node *sf_node_create(ino_t ino, mode_t mode)
         return NULL;
 
     node->st = st;
+
+    node->open = 0;
+    node->reading = 0;
+    node->writing = 0;
+    node->remove = 0;
+
+    errno = pthread_mutex_init(&(node->lock), NULL);
+
+    if (errno != 0) {
+        sf_node_destroy(node);
+        return NULL;
+    }
+
+    errno = pthread_cond_init(&(node->cond), NULL);
+
+    if (errno != 0) {
+        sf_node_destroy(node);
+        return NULL;
+    }
+
     node->blocklist = NULL;
 
     return node;
-}
-
-static void sf_node_destroy(struct sf_node *node)
-{
-    struct sf_blocklist_item *curblock, *nextblock;
-
-    curblock = node->blocklist;
-
-    while (curblock != NULL) {
-        nextblock = curblock->next;
-        sf_addr_free(curblock->addr);
-        free(curblock);
-        curblock = nextblock;
-    }
-
-    sf_ino_free(node->st->st_ino);
-
-    free(node->st);
-    free(node);
 }
 
 static struct sf_nodelist_item *sf_nodelist_item_create(struct sf_node *node)
@@ -563,15 +588,19 @@ ssize_t sf_node_read(char *buf, size_t size, off_t offset, struct sf_node *node)
     b_read = 0;
 
     while (item != NULL && b_read < size) {
-        // TODO: improve seeking of file's starting writing position
+        pthread_mutex_lock(&lock_file);
+        // TODO: improve seeking of file's position
         fseek(fh, item->addr + off, SEEK_SET);
 
         off = fread(buf, sizeof(char), sf_util_min(size - (size_t) b_read, blksize - off), fh);
 
         if (ferror(fh)) {
+            pthread_mutex_unlock(&lock_file);
+
             b_read = -EIO;
             break;
         }
+        pthread_mutex_unlock(&lock_file);
 
         buf += off;
         b_read += off;
@@ -615,6 +644,7 @@ ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node
             item = sf_blocklist_item_create(addr);
 
             if (item == NULL) {
+                sf_addr_free(addr);
                 b_written = -EIO;
                 break;
             }
@@ -624,7 +654,8 @@ ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node
             node->st->st_blocks += blksize / 512;
         }
 
-        // TODO: improve seeking of file's starting writing position
+        pthread_mutex_lock(&lock_file);
+        // TODO: improve seeking of file's position
         fseek(fh, item->addr + off, SEEK_SET);
 
         off = fwrite(buf, sizeof(char), sf_util_min(size - (size_t) b_written, blksize - off), fh);
@@ -632,9 +663,12 @@ ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node
         node->st->st_size += off;
 
         if (ferror(fh)) {
+            pthread_mutex_unlock(&lock_file);
+
             b_written = -EIO;
             break;
         }
+        pthread_mutex_unlock(&lock_file);
 
         buf += off;
         b_written += off;
@@ -720,6 +754,104 @@ ssize_t sf_node_resize(struct sf_node *node, size_t size)
     }
 
     return ret;
+}
+
+int sf_node_lock(int mode, struct sf_node *node)
+{
+    int ret;
+
+    ret = 0;
+
+    sf_log_debug("sf_node_lock(mode=%d, node=%p)\n", mode, node);
+
+    if (node == NULL) {
+        ret = EINVAL;
+        goto err;
+    }
+
+    if (!(mode & NODE_LOCK_MODE_RD) && !(mode & NODE_LOCK_MODE_WR)) {
+        ret = EINVAL;
+        goto err;
+    }
+
+    ret = pthread_mutex_lock(&(node->lock));
+
+    if (ret != 0)
+        goto fatal;
+
+    while (node->writing || (mode & NODE_LOCK_MODE_WR && node->reading)) {
+        ret = pthread_cond_wait(&(node->cond), &(node->lock));
+
+        if (ret != 0)
+            goto fatal;
+    }
+
+    if (mode & NODE_LOCK_MODE_RD)
+        node->reading++;
+    else if (mode & NODE_LOCK_MODE_WR)
+        node->writing = 1;
+
+    ret = pthread_mutex_unlock(&(node->lock));
+
+    if (ret != 0)
+        goto fatal;
+
+    return ret;
+
+err:
+    sf_log_error("sf_node_lock(mode=%d, node=%p)\n", mode, node);
+    return -ret;
+fatal:
+    sf_log_fatal("sf_node_lock(mode=%d, node=%p)\n", mode, node);
+    exit(EXIT_FAILURE);
+}
+
+int sf_node_unlock(int mode, struct sf_node *node)
+{
+    int ret;
+
+    ret = 0;
+
+    sf_log_debug("sf_node_unlock(mode=%d, node=%p)\n", mode, node);
+
+    if (node == NULL) {
+        ret = EINVAL;
+        goto err;
+    }
+
+    if (!(mode & NODE_LOCK_MODE_RD) && !(mode & NODE_LOCK_MODE_WR)) {
+        ret = EINVAL;
+        goto err;
+    }
+
+    ret = pthread_mutex_lock(&(node->lock));
+
+    if (ret != 0)
+        goto fatal;
+
+    if (mode & NODE_LOCK_MODE_RD)
+        node->reading--;
+    else if (mode & NODE_LOCK_MODE_WR)
+        node->writing = 0;
+
+    ret = pthread_cond_signal(&(node->cond));
+
+    if (ret != 0)
+        goto fatal;
+
+    ret = pthread_mutex_unlock(&(node->lock));
+
+    if (ret != 0)
+        goto fatal;
+
+    return ret;
+
+err:
+    sf_log_error("sf_node_unlock(mode=%d, node=%p)\n", mode, node);
+    return -ret;
+fatal:
+    sf_log_fatal("sf_node_lock(mode=%d, node=%p)\n", mode, node);
+    exit(EXIT_FAILURE);
 }
 
 void sf_node_remove(struct sf_node *node)
@@ -885,17 +1017,22 @@ int sf_init(const char *filename)
 
     ret = pthread_mutex_init(&lock_ino, NULL);
 
-    if (ret < 0)
+    if (ret != 0)
         goto err;
 
     ret = pthread_mutex_init(&lock_addr, NULL);
 
-    if (ret < 0)
+    if (ret != 0)
         goto err;
 
     ret = pthread_mutex_init(&lock_stat, NULL);
 
-    if (ret < 0)
+    if (ret != 0)
+        goto err;
+
+    ret = pthread_mutex_init(&lock_file, NULL);
+
+    if (ret != 0)
         goto err;
 
     return ret;
@@ -937,6 +1074,7 @@ void sf_destroy()
     pthread_mutex_destroy(&lock_ino);
     pthread_mutex_destroy(&lock_addr);
     pthread_mutex_destroy(&lock_stat);
+    pthread_mutex_destroy(&lock_file);
 
     free(sf_data);
 }

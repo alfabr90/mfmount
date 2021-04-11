@@ -16,6 +16,7 @@
 #include "sffs.h"
 
 static pthread_mutex_t lock_file;
+static pthread_mutex_t lock_node;
 
 static int sf_access(const char *path, int mask)
 {
@@ -76,10 +77,14 @@ static int sf_getattr(const char *path, struct stat *statbuf)
     }
 
     ino = file->ino;
+    pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
     node = sf_node_get(ino);
 
-    memcpy(statbuf, node->st, sizeof(struct stat));
-    pthread_mutex_unlock(&lock_file);
+    if (node != NULL)
+        memcpy(statbuf, node->st, sizeof(struct stat));
+    pthread_mutex_unlock(&lock_node);
 
     return ret;
 
@@ -115,11 +120,16 @@ static int sf_chmod(const char *path, mode_t mode)
     }
 
     ino = file->ino;
+    pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
     node = sf_node_get(ino);
 
-    node->st->st_mode = mode;
-    node->st->st_ctime = time(NULL);
-    pthread_mutex_unlock(&lock_file);
+    if (node != NULL) {
+        node->st->st_mode = mode;
+        node->st->st_ctime = time(NULL);
+    }
+    pthread_mutex_unlock(&lock_node);
 
     return ret;
 
@@ -155,12 +165,17 @@ static int sf_chown(const char *path, uid_t uid, gid_t gid)
     }
 
     ino = file->ino;
+    pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
     node = sf_node_get(ino);
 
-    node->st->st_uid = uid;
-    node->st->st_gid = gid;
-    node->st->st_ctime = time(NULL);
-    pthread_mutex_unlock(&lock_file);
+    if (node != NULL) {
+        node->st->st_uid = uid;
+        node->st->st_gid = gid;
+        node->st->st_ctime = time(NULL);
+    }
+    pthread_mutex_unlock(&lock_node);
 
     return ret;
 
@@ -196,12 +211,17 @@ static int sf_utimens(const char *path, const struct timespec ts[2])
     }
 
     ino = file->ino;
+    pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
     node = sf_node_get(ino);
 
-    node->st->st_atime = ts[0].tv_sec;
-    node->st->st_mtime = ts[1].tv_sec;
-    node->st->st_ctime = time(NULL);
-    pthread_mutex_unlock(&lock_file);
+    if (node != NULL) {
+        node->st->st_atime = ts[0].tv_sec;
+        node->st->st_mtime = ts[1].tv_sec;
+        node->st->st_ctime = time(NULL);
+    }
+    pthread_mutex_unlock(&lock_node);
 
     return ret;
 
@@ -251,18 +271,21 @@ static int sf_mkdir(const char *path, mode_t mode)
         goto err_unlock_file;
 
     file = sf_file_find(path);
+
     ino = file->ino;
 
+    pthread_mutex_lock(&lock_node);
     ret = sf_node_put(ino, S_IFDIR | mode);
-    pthread_mutex_unlock(&lock_file);
+    pthread_mutex_unlock(&lock_node);
 
-    if (ret < 0)
-        goto err_file_remove;
+    if (ret < 0) {
+        sf_file_remove(file);
+        goto err_unlock_file;
+    }
+    pthread_mutex_unlock(&lock_file);
 
     return ret;
 
-err_file_remove:
-    sf_file_remove(file);
 err_unlock_file:
     pthread_mutex_unlock(&lock_file);
 err:
@@ -273,6 +296,7 @@ err:
 static int sf_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
 {
     int ret;
+    ino_t ino;
     struct stat st;
     struct sf_file *file;
     struct sf_filelist_item *item;
@@ -295,9 +319,13 @@ static int sf_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
         goto err_unlock_file;
     }
 
-    node = sf_node_get(file->ino);
+    ino = file->ino;
+
+    pthread_mutex_lock(&lock_node);
+    node = sf_node_get(ino);
 
     node->st->st_atime = time(NULL);
+    pthread_mutex_unlock(&lock_node);
 
     item = file->filelist;
 
@@ -307,9 +335,13 @@ static int sf_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
     while (item != NULL) {
         file = item->file;
 
-        node = sf_node_get(file->ino);
+        ino = file->ino;
+
+        pthread_mutex_lock(&lock_node);
+        node = sf_node_get(ino);
 
         memcpy(&st, node->st, sizeof(struct stat));
+        pthread_mutex_unlock(&lock_node);
 
         if (filler(buf, file->name, &st, 0) != 0) {
             ret = -ENOMEM;
@@ -354,11 +386,20 @@ static int sf_opendir(const char *path, struct fuse_file_info *fi)
     }
 
     ino = file->ino;
+    pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
     node = sf_node_get(ino);
 
-    // TODO: check permissions (open flags in `fi`)
-    node->st->st_atime = time(NULL);
-    pthread_mutex_unlock(&lock_file);
+    if (node != NULL) {
+        pthread_mutex_lock(&(node->lock));
+        node->open++;
+        pthread_mutex_unlock(&(node->lock));
+
+        // TODO: check permissions (open flags in `fi`)
+        node->st->st_atime = time(NULL);
+    }
+    pthread_mutex_unlock(&lock_node);
 
     return ret;
 
@@ -394,11 +435,23 @@ static int sf_rmdir(const char *path)
     }
 
     ino = file->ino;
+
     sf_file_remove(file);
+    pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
     node = sf_node_get(ino);
 
-    sf_node_remove(node);
-    pthread_mutex_unlock(&lock_file);
+    if (node != NULL) {
+        pthread_mutex_lock(&(node->lock));
+        node->remove = 1;
+
+        if (node->open == 0)
+            sf_node_remove(node);
+        else
+            pthread_mutex_unlock(&(node->lock));
+    }
+    pthread_mutex_unlock(&lock_node);
 
     return ret;
 
@@ -412,7 +465,9 @@ err:
 static int sf_releasedir(const char *path, struct fuse_file_info *fi)
 {
     int ret;
+    ino_t ino;
     struct sf_file *file;
+    struct sf_node *node;
 
     ret = 0;
 
@@ -430,7 +485,23 @@ static int sf_releasedir(const char *path, struct fuse_file_info *fi)
         ret = -ENOENT;
         goto err_unlock_file;
     }
+
+    ino = file->ino;
     pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
+    node = sf_node_get(ino);
+
+    if (node != NULL) {
+        pthread_mutex_lock(&(node->lock));
+        node->open--;
+
+        if (node->remove == 1 && node->open == 0)
+            sf_node_remove(node);
+        else
+            pthread_mutex_unlock(&(node->lock));
+    }
+    pthread_mutex_unlock(&lock_node);
 
     return ret;
 
@@ -480,18 +551,21 @@ static int sf_mknod(const char *path, mode_t mode, dev_t dev)
         goto err_unlock_file;
 
     file = sf_file_find(path);
+
     ino = file->ino;
 
+    pthread_mutex_lock(&lock_node);
     ret = sf_node_put(ino, S_IFREG | mode);
-    pthread_mutex_unlock(&lock_file);
+    pthread_mutex_unlock(&lock_node);
 
-    if (ret < 0)
-        goto err_file_remove;
+    if (ret < 0) {
+        sf_file_remove(file);
+        goto err_unlock_file;
+    }
+    pthread_mutex_unlock(&lock_file);
 
     return ret;
 
-err_file_remove:
-    sf_file_remove(file);
 err_unlock_file:
     pthread_mutex_unlock(&lock_file);
 err:
@@ -524,11 +598,20 @@ static int sf_open(const char *path, struct fuse_file_info *fi)
     }
 
     ino = file->ino;
+    pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
     node = sf_node_get(ino);
 
-    // TODO: check permissions
-    node->st->st_atime = time(NULL);
-    pthread_mutex_unlock(&lock_file);
+    if (node != NULL) {
+        pthread_mutex_lock(&(node->lock));
+        node->open++;
+        pthread_mutex_unlock(&(node->lock));
+
+        // TODO: check permissions
+        node->st->st_atime = time(NULL);
+    }
+    pthread_mutex_unlock(&lock_node);
 
     return ret;
 
@@ -564,12 +647,17 @@ static int sf_read(const char *path, char *buf, size_t size, off_t offset, struc
     }
 
     ino = file->ino;
-    node = sf_node_get(ino);
+    pthread_mutex_unlock(&lock_file);
 
+    pthread_mutex_lock(&lock_node);
+    node = sf_node_get(ino);
+    pthread_mutex_unlock(&lock_node);
+
+    sf_node_lock(NODE_LOCK_MODE_RD, node);
     ret = (int) sf_node_read(buf, size, offset, node);
 
     node->st->st_atime = time(NULL);
-    pthread_mutex_unlock(&lock_file);
+    sf_node_unlock(NODE_LOCK_MODE_RD, node);
 
     if (ret < 0)
         goto err;
@@ -613,12 +701,17 @@ static int sf_write(const char *path, const char *buf, size_t size, off_t offset
     }
 
     ino = file->ino;
-    node = sf_node_get(ino);
+    pthread_mutex_unlock(&lock_file);
 
+    pthread_mutex_lock(&lock_node);
+    node = sf_node_get(ino);
+    pthread_mutex_unlock(&lock_node);
+
+    sf_node_lock(NODE_LOCK_MODE_RD, node);
     ret = (int) sf_node_write(buf, size, offset, node);
 
     node->st->st_mtime = time(NULL);
-    pthread_mutex_unlock(&lock_file);
+    sf_node_unlock(NODE_LOCK_MODE_RD, node);
 
     if (ret < 0)
         goto err;
@@ -658,20 +751,27 @@ static int sf_truncate(const char *path, off_t size)
     }
 
     ino = file->ino;
+    pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
     node = sf_node_get(ino);
 
     if (S_ISDIR(node->st->st_mode)) {
-        ret = -EISDIR;
-        goto err_unlock_file;
-    }
+        pthread_mutex_unlock(&lock_node);
 
+        ret = -EISDIR;
+        goto err;
+    }
+    pthread_mutex_unlock(&lock_node);
+
+    sf_node_lock(NODE_LOCK_MODE_RD, node);
     ret = (int) sf_node_resize(node, size);
 
     t = time(NULL);
 
     node->st->st_mtime = t;
     node->st->st_ctime = t;
-    pthread_mutex_unlock(&lock_file);
+    sf_node_unlock(NODE_LOCK_MODE_RD, node);
 
     if (ret < 0)
         goto err;
@@ -728,6 +828,7 @@ static int sf_rename(const char *path, const char *newpath)
         newfileparent = newfile->parent;
     }
 
+    pthread_mutex_lock(&lock_node);
     oldnode = sf_node_get(oldfile->ino);
 
     oldnodeparent = sf_node_get(oldfile->parent->ino);
@@ -748,7 +849,7 @@ static int sf_rename(const char *path, const char *newpath)
             free(name);
 
             if (ret < 0)
-                goto err_unlock_file;
+                goto err_unlock_node;
 
             created = 1;
 
@@ -757,7 +858,7 @@ static int sf_rename(const char *path, const char *newpath)
             ret = sf_node_put(newfile->ino, oldnode->st->st_mode);
 
             if (ret < 0)
-                goto err_unlock_file;
+                goto err_unlock_node;
 
             newnode = sf_node_get(newfile->ino);
         }
@@ -766,11 +867,11 @@ static int sf_rename(const char *path, const char *newpath)
             if (S_ISDIR(newnode->st->st_mode)) {
                 if (newfile->filelist != NULL) {
                     ret = -ENOTEMPTY;
-                    goto err_unlock_file;
+                    goto err_unlock_node;
                 }
             } else {
                 ret = -ENOTDIR;
-                goto err_unlock_file;
+                goto err_unlock_node;
             }
 
             newnode->st->st_mtime = t;
@@ -778,9 +879,10 @@ static int sf_rename(const char *path, const char *newpath)
         } else if (S_ISREG(oldnode->st->st_mode)) {
             if (!S_ISREG(newnode->st->st_mode)) {
                 ret = -EISDIR;
-                goto err_unlock_file;
+                goto err_unlock_node;
             }
 
+            // TODO: check whether there is need for concurrency control with read and write operations
             item = newnode->blocklist;
             newnode->blocklist = oldnode->blocklist;
             oldnode->blocklist = item;
@@ -792,22 +894,24 @@ static int sf_rename(const char *path, const char *newpath)
         }
     } else {
         ret = -ENOTSUP;
-        goto err_unlock_file;
+        goto err_unlock_node;
     }
 
     sf_file_remove(oldfile);
+    sf_node_remove(oldnode);
 
     oldnodeparent->st->st_mtime = t;
     oldnodeparent->st->st_ctime = t;
 
     newnodeparent->st->st_mtime = t;
     newnodeparent->st->st_ctime = t;
-
-    sf_node_remove(oldnode);
+    pthread_mutex_unlock(&lock_node);
     pthread_mutex_unlock(&lock_file);
 
     return ret;
 
+err_unlock_node:
+    pthread_mutex_unlock(&lock_node);
 err_unlock_file:
     if (created)
         sf_file_remove(newfile);
@@ -842,11 +946,23 @@ static int sf_unlink(const char *path)
     }
 
     ino = file->ino;
+
     sf_file_remove(file);
+    pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
     node = sf_node_get(ino);
 
-    sf_node_remove(node);
-    pthread_mutex_unlock(&lock_file);
+    if (node != NULL) {
+        pthread_mutex_lock(&(node->lock));
+        node->remove = 1;
+
+        if (node->open == 0)
+            sf_node_remove(node);
+        else
+            pthread_mutex_unlock(&(node->lock));
+    }
+    pthread_mutex_unlock(&lock_node);
 
     return ret;
 
@@ -860,7 +976,9 @@ err:
 static int sf_release(const char *path, struct fuse_file_info *fi)
 {
     int ret;
+    ino_t ino;
     struct sf_file *file;
+    struct sf_node *node;
 
     ret = 0;
 
@@ -878,7 +996,23 @@ static int sf_release(const char *path, struct fuse_file_info *fi)
         ret = -ENOENT;
         goto err_unlock_file;
     }
+
+    ino = file->ino;
     pthread_mutex_unlock(&lock_file);
+
+    pthread_mutex_lock(&lock_node);
+    node = sf_node_get(ino);
+
+    if (node != NULL) {
+        pthread_mutex_lock(&(node->lock));
+        node->open--;
+
+        if (node->remove == 1 && node->open == 0)
+            sf_node_remove(node);
+        else
+            pthread_mutex_unlock(&(node->lock));
+    }
+    pthread_mutex_unlock(&lock_node);
 
     return ret;
 
@@ -967,25 +1101,31 @@ int main(int argc, char** argv)
 
     ret = pthread_mutex_init(&lock_file, NULL);
 
-    if (ret < 0) {
-        sf_log_fatal("%s\n", strerror(-ret));
-        exit(EXIT_FAILURE);
-    }
+    if (ret != 0)
+        goto fatal;
+
+    ret = pthread_mutex_init(&lock_node, NULL);
+
+    if (ret != 0)
+        goto fatal;
 
     ret = sf_init(filename);
 
-    if (ret < 0) {
-        sf_log_fatal("%s\n", strerror(-ret));
-        exit(EXIT_FAILURE);
-    }
+    if (ret != 0)
+        goto fatal;
 
     ret = fuse_main(argc, argv, &sf_operations, NULL);
 
     sf_destroy();
 
     pthread_mutex_destroy(&lock_file);
+    pthread_mutex_destroy(&lock_node);
 
     sf_log_destroy();
 
     return ret;
+
+fatal:
+    sf_log_fatal("main(argc=%d, argv=%p): %s\n", argc, argv, strerror(ret));
+    exit(EXIT_FAILURE);
 }
