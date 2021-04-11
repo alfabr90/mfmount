@@ -218,6 +218,7 @@ static int sf_mkdir(const char *path, mode_t mode)
     int ret;
     ino_t ino;
     char *name;
+    const char *delim;
     struct sf_file *file;
 
     ret = 0;
@@ -242,7 +243,9 @@ static int sf_mkdir(const char *path, mode_t mode)
         goto err_unlock_file;
     }
 
-    name = sf_get_filename(path);
+    delim = DIR_DELIMITER;
+
+    name = sf_util_filename_from_path(path, delim);
 
     ret = sf_file_add(file, name);
 
@@ -447,6 +450,7 @@ static int sf_mknod(const char *path, mode_t mode, dev_t dev)
     int ret;
     ino_t ino;
     char *name;
+    const char *delim;
     struct sf_file *file;
 
     ret = 0;
@@ -471,7 +475,9 @@ static int sf_mknod(const char *path, mode_t mode, dev_t dev)
         goto err_unlock_file;
     }
 
-    name = sf_get_filename(path);
+    delim = DIR_DELIMITER;
+
+    name = sf_util_filename_from_path(path, delim);
 
     ret = sf_file_add(file, name);
 
@@ -691,6 +697,7 @@ static int sf_rename(const char *path, const char *newpath)
     int ret, created;
     time_t t;
     char *name;
+    const char *delim;
     struct sf_file *oldfile, *newfile, *newfileparent;
     struct sf_node *oldnode, *newnode, *oldnodeparent, *newnodeparent;
     struct sf_blocklist_item *item;
@@ -739,10 +746,12 @@ static int sf_rename(const char *path, const char *newpath)
 
     t = time(NULL);
 
+    delim = DIR_DELIMITER;
+
     // TODO: consider links, pipes etc
     if (S_ISDIR(oldnode->st->st_mode) || S_ISREG(oldnode->st->st_mode)) {
         if (newfile == NULL) {
-            name = sf_get_filename(newpath);
+            name = sf_util_filename_from_path(newpath, delim);
 
             ret = sf_file_add(newfileparent, name);
 
