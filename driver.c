@@ -12,8 +12,9 @@
 #include <sys/statvfs.h>
 #include <fuse.h>
 
-#include "log.h"
 #include "sffs.h"
+#include "log.h"
+#include "util.h"
 
 static pthread_mutex_t lock_file;
 static pthread_mutex_t lock_node;
