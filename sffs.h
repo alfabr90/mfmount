@@ -10,11 +10,15 @@
 #include <sys/statvfs.h>
 
 #define BLOCK_SIZE 4096
+
 #define INO_MAX 4194304
 #define INO_TBL_SIZE 65599 // Prime number nearest 65536
-#define PATH_MAX 4096
 
+#define PATH_MAX 4096
 #define DIR_DELIMITER "/"
+
+#define NODE_LOCK_MODE_RD 0
+#define NODE_LOCK_MODE_WR 1
 
 struct sf_blocklist_item {
     size_t addr;
@@ -24,6 +28,12 @@ struct sf_blocklist_item {
 
 struct sf_node {
     struct stat *st;
+    int open;
+    int reading;
+    int writing;
+    int remove;
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
     struct sf_blocklist_item *blocklist;
 };
 
@@ -76,6 +86,10 @@ ssize_t sf_node_read(char *buf, size_t size, off_t offset, struct sf_node *node)
 ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node *node);
 
 ssize_t sf_node_resize(struct sf_node *node, size_t size);
+
+int sf_node_lock(int mode, struct sf_node *node);
+
+int sf_node_unlock(int mode, struct sf_node *node);
 
 void sf_node_remove(struct sf_node *node);
 
