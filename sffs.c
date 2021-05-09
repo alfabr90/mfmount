@@ -751,7 +751,7 @@ int sf_node_lock(int mode, struct sf_node *node)
     }
 
     if (!(mode & NODE_LOCK_MODE_RD) && !(mode & NODE_LOCK_MODE_WR)) {
-        ret = EINVAL;
+        ret = ENOTSUP;
         goto err;
     }
 
@@ -768,7 +768,7 @@ int sf_node_lock(int mode, struct sf_node *node)
     return ret;
 
 err:
-    sf_log_error("sf_node_lock(mode=%d, node=%p)\n", mode, node);
+    sf_log_error("sf_node_lock(mode=%d, node=%p): %s\n", mode, node, strerror(ret));
     return -ret;
 }
 
@@ -786,7 +786,7 @@ int sf_node_unlock(int mode, struct sf_node *node)
     }
 
     if (!(mode & NODE_LOCK_MODE_RD) && !(mode & NODE_LOCK_MODE_WR)) {
-        ret = EINVAL;
+        ret = ENOTSUP;
         goto err;
     }
 
@@ -801,7 +801,7 @@ int sf_node_unlock(int mode, struct sf_node *node)
     return ret;
 
 err:
-    sf_log_error("sf_node_unlock(mode=%d, node=%p)\n", mode, node);
+    sf_log_error("sf_node_unlock(mode=%d, node=%p): %s\n", mode, node, strerror(ret));
     return -ret;
 }
 
