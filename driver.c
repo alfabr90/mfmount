@@ -21,10 +21,16 @@ static pthread_mutex_t lock_node;
 
 static int sf_access(const char *path, int mask)
 {
-    int ret;
+    int ret, found;
+    ino_t ino;
+    mode_t st_mode;
+    uid_t uid, st_uid;
+    gid_t gid, st_gid;
     struct sf_file *file;
+    struct sf_node *node;
 
     ret = 0;
+    found = 0;
 
     sf_log_debug("sf_access(path=%s, mask=%d)\n", path, mask);
 
@@ -40,9 +46,46 @@ static int sf_access(const char *path, int mask)
         ret = -ENOENT;
         goto err_unlock_file;
     }
+
+    ino = file->ino;
     sf_util_mutex_unlock(&lock_file);
 
-    // TODO: check permissions
+    sf_util_mutex_lock(&lock_node);
+    node = sf_node_get(ino);
+
+    if (node != NULL) {
+        found = 1;
+        st_mode = node->st->st_mode;
+        st_uid = node->st->st_uid;
+        st_gid = node->st->st_gid;
+    }
+    sf_util_mutex_unlock(&lock_node);
+
+    if (found) {
+        uid = getuid();
+        gid = getgid();
+
+        if (uid != 0 && mask & R_OK) {
+            if (!((st_uid == uid && st_mode & S_IRUSR) || (st_gid == gid && st_mode & S_IRGRP) || (st_uid != uid && st_gid != gid && st_mode & S_IROTH))) {
+                ret = -EACCES;
+                goto err_unlock_file;
+            }
+        }
+
+        if (uid != 0 && mask & W_OK) {
+            if (!((st_uid == uid && st_mode & S_IWUSR) || (st_gid == gid && st_mode & S_IWGRP) || (st_uid != uid && st_gid != gid && st_mode & S_IWOTH))) {
+                ret = -EACCES;
+                goto err_unlock_file;
+            }
+        }
+
+        if (mask & X_OK) {
+            if (!((st_uid == uid && st_mode & S_IXUSR) || (st_gid == gid && st_mode & S_IXGRP) || (st_uid != uid && st_gid != gid && st_mode & S_IXOTH))) {
+                ret = -EACCES;
+                goto err_unlock_file;
+            }
+        }
+    }
 
     return ret;
 
@@ -400,7 +443,7 @@ static int sf_opendir(const char *path, struct fuse_file_info *fi)
         node->open++;
         sf_util_mutex_unlock(&(node->lock));
 
-        // TODO: check permissions (open flags in `fi`)
+        // TODO: consider absence of FUSE's `default_permission` option in order to check permissions
         node->st->st_atime = time(NULL);
     }
     sf_util_mutex_unlock(&lock_node);
@@ -615,7 +658,7 @@ static int sf_open(const char *path, struct fuse_file_info *fi)
         node->open++;
         sf_util_mutex_unlock(&(node->lock));
 
-        // TODO: check permissions
+        // TODO: consider absence of FUSE's `default_permission` option in order to check permissions
         node->st->st_atime = time(NULL);
     }
     sf_util_mutex_unlock(&lock_node);
