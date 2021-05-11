@@ -750,18 +750,18 @@ int sf_node_lock(int mode, struct sf_node *node)
         goto err;
     }
 
-    if (!(mode & NODE_LOCK_MODE_RD) && !(mode & NODE_LOCK_MODE_WR)) {
+    if (!(mode & NODE_LOCKMODE_R) && !(mode & NODE_LOCKMODE_W)) {
         ret = ENOTSUP;
         goto err;
     }
 
     sf_util_mutex_lock(&(node->lock));
-    while (node->writing || (mode & NODE_LOCK_MODE_WR && node->reading))
+    while (node->writing || (mode & NODE_LOCKMODE_W && node->reading))
         sf_util_cond_wait(&(node->cond), &(node->lock));
 
-    if (mode & NODE_LOCK_MODE_RD)
+    if (mode & NODE_LOCKMODE_R)
         node->reading++;
-    else if (mode & NODE_LOCK_MODE_WR)
+    else if (mode & NODE_LOCKMODE_W)
         node->writing = 1;
     sf_util_mutex_unlock(&(node->lock));
 
@@ -785,15 +785,15 @@ int sf_node_unlock(int mode, struct sf_node *node)
         goto err;
     }
 
-    if (!(mode & NODE_LOCK_MODE_RD) && !(mode & NODE_LOCK_MODE_WR)) {
+    if (!(mode & NODE_LOCKMODE_R) && !(mode & NODE_LOCKMODE_W)) {
         ret = ENOTSUP;
         goto err;
     }
 
     sf_util_mutex_lock(&(node->lock));
-    if (mode & NODE_LOCK_MODE_RD)
+    if (mode & NODE_LOCKMODE_R)
         node->reading--;
-    else if (mode & NODE_LOCK_MODE_WR)
+    else if (mode & NODE_LOCKMODE_W)
         node->writing = 0;
     sf_util_cond_signal(&(node->cond));
     sf_util_mutex_unlock(&(node->lock));
