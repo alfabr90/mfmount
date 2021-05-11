@@ -17,8 +17,8 @@
 #define PATH_MAX 4096
 #define DIR_DELIMITER "/"
 
-#define NODE_LOCK_MODE_RD 0
-#define NODE_LOCK_MODE_WR 1
+#define NODE_LOCKMODE_R 1
+#define NODE_LOCKMODE_W 2
 
 struct sf_blocklist_item {
     size_t addr;
