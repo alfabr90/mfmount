@@ -382,13 +382,13 @@ static int sf_opendir(const char *path, struct fuse_file_info *fi)
 
     node = sf_node_get(file->ino);
 
+    // TODO: consider absence of FUSE's `default_permission` option in order to check permissions
+    sf_util_mutex_unlock(&lock);
+
     sf_util_mutex_lock(&(node->lock));
     node->open++;
-    sf_util_mutex_unlock(&(node->lock));
-
-    // TODO: consider absence of FUSE's `default_permission` option in order to check permissions
     node->st->st_atime = time(NULL);
-    sf_util_mutex_unlock(&lock);
+    sf_util_mutex_unlock(&(node->lock));
 
     return ret;
 
@@ -425,6 +425,7 @@ static int sf_rmdir(const char *path)
     node = sf_node_get(file->ino);
 
     sf_file_remove(file);
+    sf_util_mutex_unlock(&lock);
 
     sf_util_mutex_lock(&(node->lock));
     node->remove = 1;
@@ -433,7 +434,6 @@ static int sf_rmdir(const char *path)
         sf_node_remove(node);
     else
         sf_util_mutex_unlock(&(node->lock));
-    sf_util_mutex_unlock(&lock);
 
     return ret;
 
@@ -468,6 +468,7 @@ static int sf_releasedir(const char *path, struct fuse_file_info *fi)
     }
 
     node = sf_node_get(file->ino);
+    sf_util_mutex_unlock(&lock);
 
     sf_util_mutex_lock(&(node->lock));
     node->open--;
@@ -476,7 +477,6 @@ static int sf_releasedir(const char *path, struct fuse_file_info *fi)
         sf_node_remove(node);
     else
         sf_util_mutex_unlock(&(node->lock));
-    sf_util_mutex_unlock(&lock);
 
     return ret;
 
@@ -571,13 +571,13 @@ static int sf_open(const char *path, struct fuse_file_info *fi)
 
     node = sf_node_get(file->ino);
 
+    // TODO: consider absence of FUSE's `default_permission` option in order to check permissions
+    sf_util_mutex_unlock(&lock);
+
     sf_util_mutex_lock(&(node->lock));
     node->open++;
-    sf_util_mutex_unlock(&(node->lock));
-
-    // TODO: consider absence of FUSE's `default_permission` option in order to check permissions
     node->st->st_atime = time(NULL);
-    sf_util_mutex_unlock(&lock);
+    sf_util_mutex_unlock(&(node->lock));
 
     return ret;
 
@@ -832,7 +832,8 @@ static int sf_rename(const char *path, const char *newpath)
                 goto err_unlock;
             }
 
-            // TODO: check whether there is need for concurrency control with read and write operations
+            sf_node_lock(NODE_LOCKMODE_W, newnode);
+            sf_node_lock(NODE_LOCKMODE_W, oldnode);
             item = newnode->blocklist;
             newnode->blocklist = oldnode->blocklist;
             oldnode->blocklist = item;
@@ -841,6 +842,8 @@ static int sf_rename(const char *path, const char *newpath)
             newnode->st->st_blocks = oldnode->st->st_blocks;
 
             newnode->st->st_ctime = t;
+            sf_node_unlock(NODE_LOCKMODE_W, oldnode);
+            sf_node_unlock(NODE_LOCKMODE_W, newnode);
         }
     } else {
         ret = -ENOTSUP;
@@ -892,6 +895,7 @@ static int sf_unlink(const char *path)
     node = sf_node_get(file->ino);
 
     sf_file_remove(file);
+    sf_util_mutex_unlock(&lock);
 
     sf_util_mutex_lock(&(node->lock));
     node->remove = 1;
@@ -900,7 +904,6 @@ static int sf_unlink(const char *path)
         sf_node_remove(node);
     else
         sf_util_mutex_unlock(&(node->lock));
-    sf_util_mutex_unlock(&lock);
 
     return ret;
 
@@ -935,6 +938,7 @@ static int sf_release(const char *path, struct fuse_file_info *fi)
     }
 
     node = sf_node_get(file->ino);
+    sf_util_mutex_unlock(&lock);
 
     sf_util_mutex_lock(&(node->lock));
     node->open--;
@@ -943,7 +947,6 @@ static int sf_release(const char *path, struct fuse_file_info *fi)
         sf_node_remove(node);
     else
         sf_util_mutex_unlock(&(node->lock));
-    sf_util_mutex_unlock(&lock);
 
     return ret;
 
