@@ -28,6 +28,8 @@ int sf_log_error(const char *fmt, ...);
 
 int sf_log_fatal(const char *fmt, ...);
 
+int sf_log_parse_level(const char *level);
+
 int sf_log_set_level(int level);
 
 int sf_log_set_file(const char *filename, const char *mode);

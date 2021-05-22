@@ -995,10 +995,36 @@ err:
     return ret;
 }
 
+static void sf_show_usage()
+{
+    printf("FUSE driver for mounting a multi-file file system.\n");
+    printf("\nUsage:\n");
+    printf("  mfmount <file> <file>... <mount>\n");
+    printf("  mfmount <file> <file>... <mount> -l [--loglevel=<level>] [--logfile=<file>]\n");
+    printf("  mfmount -h | --help\n");
+    printf("  mfmount --version\n");
+    printf("\nOptions:\n");
+    printf("  -l                    Enable log.\n");
+    printf("  -h --help             Show this screen.\n");
+    printf("  --version             Show version.\n");
+    printf("  --loglevel=<level>    Define the log level [DEBUG|WARN|INFO|ERROR|FATAL] [default: ERROR].\n");
+    printf("  --logfile=<file>      Define the file where log messages will be written into.\n");
+
+    exit(EXIT_SUCCESS);
+}
+
+static void sf_show_version()
+{
+    printf("%s\n", VERSION);
+
+    exit(EXIT_SUCCESS);
+}
+
 int main(int argc, char** argv)
 {
-    int ret;
-    const char *filename;
+    int i, ret, lflag, loglevel, num_fuseopts, num_filenames;
+    char **fuseopts;
+    const char *logfile, **filenames;
     struct fuse_operations sf_operations = {
         .access = sf_access,
         .getattr = sf_getattr,
@@ -1021,35 +1047,83 @@ int main(int argc, char** argv)
         .statfs = sf_statfs,
     };
 
+    lflag = 0;
+    loglevel = LOG_ERROR;
+    logfile = "./log.txt";
+    num_fuseopts = 0;
+    num_filenames = 0;
+
     // TODO: check for suid to avoid privilege escalations
 
-    // TODO: validate program arguments
+    if (argc < 3) {
+        sf_show_usage();
+        exit(EXIT_FAILURE);
+    }
 
-    filename = argv[1];
+    // TODO: accept FUSE options
+    // For now, only argv[0] and the mounting point is passed in to `fuse_main`
+    fuseopts = calloc(2, sizeof(const char *));
 
-    argv[1] = argv[2];
-    argv[2] = NULL;
-    argc--;
+    if (fuseopts == NULL) {
+        printf("Could not allocate fuse options array: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
 
-    sf_log_init(LOG_ERROR, "./log.txt", "w+");
+    filenames = calloc(argc - 1, sizeof(const char *));
+
+    if (filenames == NULL) {
+        printf("Could not allocate file names array: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    i = 0;
+    fuseopts[num_fuseopts++] = argv[i++];
+
+    while (i < argc) {
+        if (strcmp(argv[i], "-l") == 0) {
+            lflag = 1;
+        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            sf_show_usage();
+        } else if (strcmp(argv[i], "--version") == 0) {
+            sf_show_version();
+        } else if (strncmp(argv[i], "--loglevel=", 11) == 0) {
+            loglevel = sf_log_parse_level(argv[i] + 11);
+
+            if (loglevel == -1)
+                sf_show_usage();
+        } else if (strncmp(argv[i], "--logfile=", 10) == 0) {
+            logfile = argv[i] + 10;
+        } else {
+            if (i == argc - 1)
+                fuseopts[num_fuseopts++] = argv[i];
+            else
+                filenames[num_filenames++] = argv[i];
+        }
+
+        i++;
+    }
+
+    if (lflag)
+        sf_log_init(loglevel, logfile, "w+");
 
     ret = pthread_mutex_init(&lock, NULL);
 
     if (ret != 0)
         goto fatal;
 
-    ret = sf_init(filename);
+    ret = sf_init(num_filenames, filenames);
 
     if (ret != 0)
         goto fatal;
 
-    ret = fuse_main(argc, argv, &sf_operations, NULL);
+    ret = fuse_main(num_fuseopts, fuseopts, &sf_operations, NULL);
 
     sf_destroy();
 
     pthread_mutex_destroy(&lock);
 
-    sf_log_destroy();
+    if (lflag)
+        sf_log_destroy();
 
     return ret;
 
