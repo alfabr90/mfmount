@@ -908,9 +908,10 @@ int sf_has_availspace(size_t size)
     return ret;
 }
 
-int sf_init(int numfiles, const char **filenames)
+int sf_init(size_t numfiles, const char **filenames)
 {
-    int i, ret;
+    int ret;
+    size_t i;
     fsblkcnt_t size, totsize;
     const char *rootname;
     struct sf_file *rootfile;
@@ -921,7 +922,7 @@ int sf_init(int numfiles, const char **filenames)
 
     curfile = 0;
 
-    sf_log_debug("sf_init(numfiles=%d, filenames=%p)\n", numfiles, filenames);
+    sf_log_debug("sf_init(numfiles=%ld, filenames=%p)\n", numfiles, filenames);
 
     if (sf_data != NULL)
         return ret;
@@ -1052,7 +1053,7 @@ err:
 
 void sf_destroy()
 {
-    int i;
+    size_t i;
     struct sf_nodelist_item *curitem, *nextitem;
 
     sf_log_debug("sf_destroy()\n");

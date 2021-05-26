@@ -68,7 +68,7 @@ struct sf_storage {
 };
 
 struct sf_state {
-    int numstorages;
+    size_t numstorages;
     struct statvfs *st;
     unsigned char *inomap;
     struct sf_filelist_item *filelist;
@@ -110,7 +110,7 @@ struct statvfs *sf_get_statfs();
 
 int sf_has_availspace(size_t size);
 
-int sf_init(int numfiles, const char **filenames);
+int sf_init(size_t numfiles, const char **filenames);
 
 void sf_destroy();
 
