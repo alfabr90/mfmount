@@ -16,26 +16,26 @@
 #define LOG_ERROR_STR "ERROR"
 #define LOG_FATAL_STR "FATAL"
 
-int sf_log(int level, const char *fmt, ...);
+int mf_log(int level, const char *fmt, ...);
 
-int sf_log_debug(const char *fmt, ...);
+int mf_log_debug(const char *fmt, ...);
 
-int sf_log_info(const char *fmt, ...);
+int mf_log_info(const char *fmt, ...);
 
-int sf_log_warn(const char *fmt, ...);
+int mf_log_warn(const char *fmt, ...);
 
-int sf_log_error(const char *fmt, ...);
+int mf_log_error(const char *fmt, ...);
 
-int sf_log_fatal(const char *fmt, ...);
+int mf_log_fatal(const char *fmt, ...);
 
-int sf_log_parse_level(const char *level);
+int mf_log_parse_level(const char *level);
 
-int sf_log_set_level(int level);
+int mf_log_set_level(int level);
 
-int sf_log_set_file(const char *filename, const char *mode);
+int mf_log_set_file(const char *filename, const char *mode);
 
-int sf_log_init(int level, const char *filename, const char *mode);
+int mf_log_init(int level, const char *filename, const char *mode);
 
-int sf_log_destroy();
+int mf_log_destroy();
 
 #endif // LOG_H
