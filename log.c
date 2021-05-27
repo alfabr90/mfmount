@@ -213,6 +213,22 @@ int sf_log_fatal(const char *fmt, ...)
     return p;
 }
 
+int sf_log_parse_level(const char *level)
+{
+    if (strcmp(level, LOG_DEBUG_STR) == 0)
+        return LOG_DEBUG;
+    if (strcmp(level, LOG_INFO_STR) == 0)
+        return LOG_INFO;
+    if (strcmp(level, LOG_WARN_STR) == 0)
+        return LOG_WARN;
+    if (strcmp(level, LOG_ERROR_STR) == 0)
+        return LOG_ERROR;
+    if (strcmp(level, LOG_FATAL_STR) == 0)
+        return LOG_FATAL;
+
+    return -1;
+}
+
 int sf_log_set_level(int level)
 {
     log_level = level;

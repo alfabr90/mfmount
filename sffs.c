@@ -17,7 +17,8 @@
 static pthread_mutex_t lock_ino;
 static pthread_mutex_t lock_addr;
 static pthread_mutex_t lock_stat;
-static pthread_mutex_t lock_file;
+
+static size_t curfile;
 
 static struct sf_state *sf_data;
 
@@ -80,21 +81,27 @@ static void sf_ino_free(ino_t ino)
     sf_util_mutex_unlock(&lock_stat);
 }
 
-static size_t sf_addr_get_free()
+static struct sf_address *sf_addr_get_free()
 {
     int i, j;
-    size_t addr, len;
+    size_t fileno, addr, len;
     fsblkcnt_t blksize;
     unsigned char *map;
+    struct sf_address *ret;
 
     sf_log_debug("sf_addr_get_free()\n");
 
     addr = -1;
     len = sf_data->st->f_blocks / CHAR_BIT;
     blksize = sf_data->st->f_bsize;
-    map = sf_data->addrmap;
 
     sf_util_mutex_lock(&lock_addr);
+    // TODO: improve free address policy
+    curfile = (curfile + 1) % sf_data->numstorages;
+    fileno = curfile;
+
+    map = sf_data->storage[fileno]->addrmap;
+
     for (i = 0; i < len; i++) {
         if (map[i] != 0xFF) {
             for (j = 0; j < CHAR_BIT; j++) {
@@ -111,28 +118,40 @@ static size_t sf_addr_get_free()
     }
     sf_util_mutex_unlock(&lock_addr);
 
-    if (addr == -1)
-        return -ENOSPC;
+    if (addr == -1) {
+        errno = ENOSPC;
+        return NULL;
+    }
 
     sf_util_mutex_lock(&lock_stat);
     sf_data->st->f_bfree--;
     sf_data->st->f_bavail = sf_data->st->f_bfree;
     sf_util_mutex_unlock(&lock_stat);
 
-    return addr;
+    ret = malloc(sizeof(struct sf_address));
+
+    if (ret == NULL) {
+        sf_log_fatal("Could not allocate address structure: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    ret->fileno = fileno;
+    ret->addrno = addr;
+
+    return ret;
 }
 
-static void sf_addr_free(size_t addr)
+static void sf_addr_free(struct sf_address *addr)
 {
     size_t i, j;
 
-    sf_log_debug("sf_addr_free(addr=%lu)\n", addr);
+    sf_log_debug("sf_addr_free(addr=%p)\n", addr);
 
-    i = addr / sf_data->st->f_bsize / CHAR_BIT;
-    j = addr / sf_data->st->f_bsize % CHAR_BIT;
+    i = addr->addrno / sf_data->st->f_bsize / CHAR_BIT;
+    j = addr->addrno / sf_data->st->f_bsize % CHAR_BIT;
 
     sf_util_mutex_lock(&lock_addr);
-    sf_data->addrmap[i] = sf_data->addrmap[i] & ~(0x1 << (CHAR_BIT - j - 1));
+    sf_data->storage[addr->fileno]->addrmap[i] = sf_data->storage[addr->fileno]->addrmap[i] & ~(0x1 << (CHAR_BIT - j - 1));
     sf_util_mutex_unlock(&lock_addr);
 
     sf_util_mutex_lock(&lock_stat);
@@ -141,11 +160,11 @@ static void sf_addr_free(size_t addr)
     sf_util_mutex_unlock(&lock_stat);
 }
 
-static struct sf_blocklist_item *sf_blocklist_item_create(size_t addr)
+static struct sf_blocklist_item *sf_blocklist_item_create(struct sf_address *addr)
 {
     struct sf_blocklist_item *item;
 
-    sf_log_debug("sf_blocklist_item_create(addr=%lu)\n", addr);
+    sf_log_debug("sf_blocklist_item_create(addr=%p)\n", addr);
 
     item = malloc(sizeof(struct sf_blocklist_item));
 
@@ -553,11 +572,12 @@ ssize_t sf_node_read(char *buf, size_t size, off_t offset, struct sf_node *node)
     ssize_t b_read;
     fsblkcnt_t blksize;
     struct sf_blocklist_item *item;
+    struct sf_storage *storage;
+    struct sf_address *addr;
     FILE* fh;
 
     sf_log_debug("sf_node_read(size=%lu, offset=%lu, node=%p)\n", size, offset, node);
 
-    fh = sf_data->fh;
     blksize = sf_data->st->f_bsize;
     item = node->blocklist;
 
@@ -569,19 +589,23 @@ ssize_t sf_node_read(char *buf, size_t size, off_t offset, struct sf_node *node)
     b_read = 0;
 
     while (item != NULL && b_read < size) {
-        sf_util_mutex_lock(&lock_file);
+        addr = item->addr;
+        storage = sf_data->storage[addr->fileno];
+        fh = storage->fh;
+
+        sf_util_mutex_lock(&(storage->lock));
         // TODO: improve seeking of file's position
-        fseek(fh, item->addr + off, SEEK_SET);
+        fseek(fh, addr->addrno + off, SEEK_SET);
 
         off = fread(buf, sizeof(char), sf_util_min(size - (size_t) b_read, blksize - off), fh);
 
         if (ferror(fh)) {
-            sf_util_mutex_unlock(&lock_file);
+            sf_util_mutex_unlock(&(storage->lock));
 
             b_read = -EIO;
             break;
         }
-        sf_util_mutex_unlock(&lock_file);
+        sf_util_mutex_unlock(&(storage->lock));
 
         buf += off;
         b_read += off;
@@ -596,15 +620,18 @@ ssize_t sf_node_read(char *buf, size_t size, off_t offset, struct sf_node *node)
 ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node *node)
 {
     int i;
-    size_t addr, off;
+    size_t off;
     ssize_t b_written;
     fsblkcnt_t blksize;
     struct sf_blocklist_item *item;
+    struct sf_storage *storage;
+    struct sf_address *addr;
     FILE* fh;
+
+    fh = NULL;
 
     sf_log_debug("sf_node_write(size=%lu, offset=%lu, node=%p)\n", size, offset, node);
 
-    fh = sf_data->fh;
     blksize = sf_data->st->f_bsize;
     item = node->blocklist;
 
@@ -619,8 +646,8 @@ ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node
         if (item == NULL) {
             addr = sf_addr_get_free();
 
-            if (addr < 0)
-                return addr;
+            if (addr == NULL)
+                return -errno;
 
             item = sf_blocklist_item_create(addr);
 
@@ -633,23 +660,28 @@ ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node
             sf_blocklist_item_add(node, item);
 
             node->st->st_blocks += blksize / 512;
+        } else {
+            addr = item->addr;
         }
 
-        sf_util_mutex_lock(&lock_file);
+        storage = sf_data->storage[addr->fileno];
+        fh = storage->fh;
+
+        sf_util_mutex_lock(&(storage->lock));
         // TODO: improve seeking of file's position
-        fseek(fh, item->addr + off, SEEK_SET);
+        fseek(fh, addr->addrno + off, SEEK_SET);
 
         off = fwrite(buf, sizeof(char), sf_util_min(size - (size_t) b_written, blksize - off), fh);
 
         node->st->st_size += off;
 
         if (ferror(fh)) {
-            sf_util_mutex_unlock(&lock_file);
+            sf_util_mutex_unlock(&(storage->lock));
 
             b_written = -EIO;
             break;
         }
-        sf_util_mutex_unlock(&lock_file);
+        sf_util_mutex_unlock(&(storage->lock));
 
         buf += off;
         b_written += off;
@@ -658,7 +690,8 @@ ssize_t sf_node_write(const char *buf, size_t size, off_t offset, struct sf_node
         item = item->next;
     }
 
-    fflush(fh);
+    if (fh != NULL)
+        fflush(fh);
 
     return b_written;
 }
@@ -875,16 +908,21 @@ int sf_has_availspace(size_t size)
     return ret;
 }
 
-int sf_init(const char *filename)
+int sf_init(size_t numfiles, const char **filenames)
 {
     int ret;
-    fsblkcnt_t size;
-    const char *rootname = "";
+    size_t i;
+    fsblkcnt_t size, totsize;
+    const char *rootname;
     struct sf_file *rootfile;
 
     ret = 0;
+    totsize = 0;
+    rootname = "";
 
-    sf_log_debug("sf_init(filename=%s)\n", filename);
+    curfile = 0;
+
+    sf_log_debug("sf_init(numfiles=%ld, filenames=%p)\n", numfiles, filenames);
 
     if (sf_data != NULL)
         return ret;
@@ -896,28 +934,53 @@ int sf_init(const char *filename)
         exit(EXIT_FAILURE);
     }
 
-    sf_data->fh = fopen(filename, "rb+");
+    sf_data->numstorages = numfiles;
 
-    if (sf_data->fh == NULL) {
-        ret = -errno;
-        goto err;
+    sf_data->storage = malloc(sf_data->numstorages * sizeof(struct sf_storage *));
+
+    if (sf_data->storage == NULL) {
+        sf_log_fatal("Could not allocate storage array: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
     }
 
-    fseek(sf_data->fh, 0, SEEK_END);
-    size = ftell(sf_data->fh);
-    fseek(sf_data->fh, 0, SEEK_SET);
+    for (i = 0; i < numfiles; i++) {
+        sf_data->storage[i] = malloc(sizeof(struct sf_storage));
+
+        if (sf_data->storage[i] == NULL) {
+            sf_log_fatal("Could not allocate storage for file \"%s\": %s\n", filenames[i], strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+
+        sf_data->storage[i]->fh = fopen(filenames[i], "rb+");
+
+        if (sf_data->storage[i]->fh == NULL) {
+            ret = -errno;
+            goto err;
+        }
+
+        fseek(sf_data->storage[i]->fh, 0, SEEK_END);
+        size = ftell(sf_data->storage[i]->fh);
+        fseek(sf_data->storage[i]->fh, 0, SEEK_SET);
+
+        totsize += size;
+
+        sf_data->storage[i]->addrmap = calloc(size / ((fsblkcnt_t) BLOCK_SIZE / CHAR_BIT), sizeof(char));
+
+        if (sf_data->storage[i]->addrmap == NULL) {
+            sf_log_fatal("Could not allocate file system block addresses bitmap for file \"%s\": %s\n", filenames[i], strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+
+        ret = pthread_mutex_init(&(sf_data->storage[i]->lock), NULL);
+
+        if (ret != 0)
+            goto err;
+    }
 
     sf_data->inomap = calloc(INO_MAX / ((size_t) CHAR_BIT) - 1, sizeof(char));
 
     if (sf_data->inomap == NULL) {
         sf_log_fatal("Could not allocate file system inode bitmap: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
-
-    sf_data->addrmap = calloc(size / ((fsblkcnt_t) BLOCK_SIZE / CHAR_BIT), sizeof(char));
-
-    if (sf_data->addrmap == NULL) {
-        sf_log_fatal("Could not allocate file system block addresses bitmap: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
@@ -937,7 +1000,7 @@ int sf_init(const char *filename)
 
     sf_data->st->f_bsize = BLOCK_SIZE;
     sf_data->st->f_frsize = sf_data->st->f_bsize;
-    sf_data->st->f_blocks = size / (fsblkcnt_t) BLOCK_SIZE;
+    sf_data->st->f_blocks = totsize / (fsblkcnt_t) BLOCK_SIZE;
     sf_data->st->f_bfree = sf_data->st->f_blocks;
     sf_data->st->f_bavail = sf_data->st->f_blocks;
     sf_data->st->f_files = INO_MAX;
@@ -981,11 +1044,6 @@ int sf_init(const char *filename)
     if (ret != 0)
         goto err;
 
-    ret = pthread_mutex_init(&lock_file, NULL);
-
-    if (ret != 0)
-        goto err;
-
     return ret;
 
 err:
@@ -995,7 +1053,7 @@ err:
 
 void sf_destroy()
 {
-    int i;
+    size_t i;
     struct sf_nodelist_item *curitem, *nextitem;
 
     sf_log_debug("sf_destroy()\n");
@@ -1010,14 +1068,23 @@ void sf_destroy()
         }
     }
 
+    for (i = 0; i < sf_data->numstorages; i++) {
+        if (sf_data->storage[i]->fh != NULL)
+            fclose(sf_data->storage[i]->fh);
+
+        free(sf_data->storage[i]->addrmap);
+
+        pthread_mutex_destroy(&(sf_data->storage[i]->lock));
+
+        free(sf_data->storage[i]);
+    }
+
+    free(sf_data->storage);
+
     if (sf_data->filelist != NULL)
         sf_file_remove(sf_data->filelist->file);
 
-    if (sf_data->fh != NULL)
-        fclose(sf_data->fh);
-
     free(sf_data->inomap);
-    free(sf_data->addrmap);
     //free(sf_data->filelist);
     free(sf_data->nodetbl);
     free(sf_data->st);
@@ -1025,7 +1092,6 @@ void sf_destroy()
     pthread_mutex_destroy(&lock_ino);
     pthread_mutex_destroy(&lock_addr);
     pthread_mutex_destroy(&lock_stat);
-    pthread_mutex_destroy(&lock_file);
 
     free(sf_data);
 }

@@ -20,8 +20,13 @@
 #define NODE_LOCKMODE_R 1
 #define NODE_LOCKMODE_W 2
 
+struct sf_address {
+    size_t fileno;
+    size_t addrno;
+};
+
 struct sf_blocklist_item {
-    size_t addr;
+    struct sf_address *addr;
     struct sf_blocklist_item *prev;
     struct sf_blocklist_item *next;
 };
@@ -56,13 +61,19 @@ struct sf_filelist_item {
     struct sf_filelist_item *next;
 };
 
+struct sf_storage {
+    unsigned char *addrmap;
+    pthread_mutex_t lock;
+    FILE *fh;
+};
+
 struct sf_state {
+    size_t numstorages;
     struct statvfs *st;
     unsigned char *inomap;
-    unsigned char *addrmap;
     struct sf_filelist_item *filelist;
     struct sf_nodelist_item **nodetbl;
-    FILE *fh;
+    struct sf_storage **storage;
 };
 
 // File operations
@@ -99,7 +110,7 @@ struct statvfs *sf_get_statfs();
 
 int sf_has_availspace(size_t size);
 
-int sf_init(const char *imgname);
+int sf_init(size_t numfiles, const char **filenames);
 
 void sf_destroy();
 
