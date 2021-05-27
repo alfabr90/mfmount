@@ -1,2 +1,3 @@
-# sfmount
-FUSE driver for mounting a single-file file system
+# mfmount
+
+FUSE driver for mounting a multi-file file system.
