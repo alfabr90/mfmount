@@ -10,7 +10,7 @@
 static int log_level = LOG_ERROR;
 static FILE *log_fh;
 
-static char *sf_log_getlevel(int level)
+static char *mf_log_getlevel(int level)
 {
     switch (level) {
     case LOG_DEBUG:
@@ -29,7 +29,7 @@ static char *sf_log_getlevel(int level)
     }
 }
 
-static char *sf_log_gettime()
+static char *mf_log_gettime()
 {
     size_t len;
     struct timespec ts;
@@ -59,7 +59,7 @@ static char *sf_log_gettime()
     return time_str;
 }
 
-static int sf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
+static int mf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
 {
     int p;
     size_t level_len, time_len, fmt_len;
@@ -76,12 +76,12 @@ static int sf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
 
     p = 0;
 
-    log_level_str = sf_log_getlevel(level);
+    log_level_str = mf_log_getlevel(level);
 
     if (log_level_str == NULL)
         return -errno;
 
-    log_time = sf_log_gettime();
+    log_time = mf_log_gettime();
 
     if (log_time == NULL)
         return -errno;
@@ -116,7 +116,7 @@ static int sf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
     return p;
 }
 
-static int sf_log_v(int level, const char *fmt, va_list ap)
+static int mf_log_v(int level, const char *fmt, va_list ap)
 {
     va_list aq;
 
@@ -125,95 +125,95 @@ static int sf_log_v(int level, const char *fmt, va_list ap)
     case LOG_INFO:
     case LOG_WARN:
         va_copy(aq, ap);
-        sf_log_vf(stdout, level, fmt, aq);
+        mf_log_vf(stdout, level, fmt, aq);
         va_end(aq);
         break;
     case LOG_ERROR:
     case LOG_FATAL:
         va_copy(aq, ap);
-        sf_log_vf(stderr, level, fmt, aq);
+        mf_log_vf(stderr, level, fmt, aq);
         va_end(aq);
         break;
     default:
         break;
     }
 
-    return sf_log_vf(log_fh, level, fmt, ap);
+    return mf_log_vf(log_fh, level, fmt, ap);
 }
 
-int sf_log(int level, const char *fmt, ...)
+int mf_log(int level, const char *fmt, ...)
 {
     int p;
     va_list ap;
 
     va_start(ap, fmt);
-    p = sf_log_v(level, fmt, ap);
+    p = mf_log_v(level, fmt, ap);
     va_end(ap);
 
     return p;
 }
 
-int sf_log_debug(const char *fmt, ...)
+int mf_log_debug(const char *fmt, ...)
 {
     int p;
     va_list ap;
 
     va_start(ap, fmt);
-    p = sf_log_v(LOG_DEBUG, fmt, ap);
+    p = mf_log_v(LOG_DEBUG, fmt, ap);
     va_end(ap);
 
     return p;
 }
 
-int sf_log_info(const char *fmt, ...)
+int mf_log_info(const char *fmt, ...)
 {
     int p;
     va_list ap;
 
     va_start(ap, fmt);
-    p = sf_log_v(LOG_INFO, fmt, ap);
+    p = mf_log_v(LOG_INFO, fmt, ap);
     va_end(ap);
 
     return p;
 }
 
-int sf_log_warn(const char *fmt, ...)
+int mf_log_warn(const char *fmt, ...)
 {
     int p;
     va_list ap;
 
     va_start(ap, fmt);
-    p = sf_log_v(LOG_WARN, fmt, ap);
+    p = mf_log_v(LOG_WARN, fmt, ap);
     va_end(ap);
 
     return p;
 }
 
-int sf_log_error(const char *fmt, ...)
+int mf_log_error(const char *fmt, ...)
 {
     int p;
     va_list ap;
 
     va_start(ap, fmt);
-    p = sf_log_v(LOG_ERROR, fmt, ap);
+    p = mf_log_v(LOG_ERROR, fmt, ap);
     va_end(ap);
 
     return p;
 }
 
-int sf_log_fatal(const char *fmt, ...)
+int mf_log_fatal(const char *fmt, ...)
 {
     int p;
     va_list ap;
 
     va_start(ap, fmt);
-    p = sf_log_v(LOG_FATAL, fmt, ap);
+    p = mf_log_v(LOG_FATAL, fmt, ap);
     va_end(ap);
 
     return p;
 }
 
-int sf_log_parse_level(const char *level)
+int mf_log_parse_level(const char *level)
 {
     if (strcmp(level, LOG_DEBUG_STR) == 0)
         return LOG_DEBUG;
@@ -229,14 +229,14 @@ int sf_log_parse_level(const char *level)
     return -1;
 }
 
-int sf_log_set_level(int level)
+int mf_log_set_level(int level)
 {
     log_level = level;
 
     return 0;
 }
 
-int sf_log_set_file(const char *filename, const char *mode)
+int mf_log_set_file(const char *filename, const char *mode)
 {
     if (log_fh != NULL)
         fclose(log_fh);
@@ -247,16 +247,16 @@ int sf_log_set_file(const char *filename, const char *mode)
     return 0;
 }
 
-int sf_log_init(int level, const char *filename, const char *mode)
+int mf_log_init(int level, const char *filename, const char *mode)
 {
     int ret;
 
-    ret = sf_log_set_level(level);
+    ret = mf_log_set_level(level);
 
     if (ret < 0)
         return ret;
 
-    ret = sf_log_set_file(filename, mode);
+    ret = mf_log_set_file(filename, mode);
 
     if (ret < 0)
         return ret;
@@ -264,7 +264,7 @@ int sf_log_init(int level, const char *filename, const char *mode)
     return 0;
 }
 
-int sf_log_destroy()
+int mf_log_destroy()
 {
     log_level = LOG_ERROR;
 

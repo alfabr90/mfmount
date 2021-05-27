@@ -2,10 +2,10 @@ CC := gcc
 CFLAGS := -Wall -O3
 LDLIBS := -lpthread
 
-TARGET := sfmount
+TARGET := mfmount
 MAIN := driver.o
-OBJ := log.o util.o sffs.o $(MAIN)
-DEPS := driver.h sffs.h util.h log.h
+OBJ := log.o util.o mffs.o $(MAIN)
+DEPS := driver.h mffs.h util.h log.h
 
 .PHONY: all clean
 
@@ -20,7 +20,7 @@ log.o: %.o : %.c log.h
 util.o: %.o : %.c util.h
 	$(CC) $(CFLAGS) $(LDLIBS) -c $<
 
-sffs.o: %.o : %.c sffs.h
+mffs.o: %.o : %.c mffs.h
 	$(CC) $(CFLAGS) $(LDLIBS) -c $<
 
 $(MAIN): %.o : %.c $(DEPS)
