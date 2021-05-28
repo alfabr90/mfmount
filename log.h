@@ -30,12 +30,10 @@ int mf_log_fatal(const char *fmt, ...);
 
 int mf_log_parse_level(const char *level);
 
-int mf_log_set_level(int level);
-
-int mf_log_set_file(const char *filename, const char *mode);
+void mf_log_set_level(int level);
 
 int mf_log_init(int level, const char *filename, const char *mode);
 
-int mf_log_destroy();
+void mf_log_destroy();
 
 #endif // LOG_H
