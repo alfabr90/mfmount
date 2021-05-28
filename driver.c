@@ -1022,7 +1022,7 @@ static void mf_show_version()
 
 int main(int argc, char** argv)
 {
-    int i, ret, lflag, loglevel, num_fuseopts, num_filenames;
+    int i, ret, lflag, loglevel, numfuseopts, numfilenames;
     char **fuseopts;
     const char *logfile, **filenames;
     struct fuse_operations mf_operations = {
@@ -1050,34 +1050,32 @@ int main(int argc, char** argv)
     lflag = 0;
     loglevel = LOG_ERROR;
     logfile = "./log.txt";
-    num_fuseopts = 0;
-    num_filenames = 0;
+    numfuseopts = 0;
+    numfilenames = 0;
 
     // TODO: check for suid to avoid privilege escalations
 
-    if (argc < 3) {
+    if (argc < 3)
         mf_show_usage();
-        exit(EXIT_FAILURE);
-    }
 
     // TODO: accept FUSE options
     // For now, only argv[0] and the mounting point is passed in to `fuse_main`
     fuseopts = calloc(2, sizeof(const char *));
 
     if (fuseopts == NULL) {
-        printf("Could not allocate fuse options array: %s\n", strerror(errno));
+        mf_log_fatal("Could not allocate fuse options array: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
     filenames = calloc(argc - 1, sizeof(const char *));
 
     if (filenames == NULL) {
-        printf("Could not allocate file names array: %s\n", strerror(errno));
+        mf_log_fatal("Could not allocate file names array: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
     i = 0;
-    fuseopts[num_fuseopts++] = argv[i++];
+    fuseopts[numfuseopts++] = argv[i++];
 
     while (i < argc) {
         if (strcmp(argv[i], "-l") == 0) {
@@ -1095,39 +1093,44 @@ int main(int argc, char** argv)
             logfile = argv[i] + 10;
         } else {
             if (i == argc - 1)
-                fuseopts[num_fuseopts++] = argv[i];
+                fuseopts[numfuseopts++] = argv[i];
             else
-                filenames[num_filenames++] = argv[i];
+                filenames[numfilenames++] = argv[i];
         }
 
         i++;
     }
 
-    if (lflag)
-        mf_log_init(loglevel, logfile, "w+");
-
     ret = pthread_mutex_init(&lock, NULL);
 
-    if (ret != 0)
-        goto fatal;
+    if (ret != 0) {
+        mf_log_fatal("Could not initialize lock: %s\n", strerror(ret));
+        exit(EXIT_FAILURE);
+    }
 
-    ret = mf_init(num_filenames, filenames);
+    if (lflag) {
+        ret = mf_log_init(loglevel, logfile, "w+");
 
-    if (ret != 0)
-        goto fatal;
+        if (ret < 0) {
+            mf_log_fatal("Could not initialize log: %s\n", strerror(-ret));
+            exit(EXIT_FAILURE);
+        }
+    }
 
-    ret = fuse_main(num_fuseopts, fuseopts, &mf_operations, NULL);
+    ret = mf_init(numfilenames, filenames);
+
+    if (ret != 0) {
+        mf_log_fatal("Could not initialize file system: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    ret = fuse_main(numfuseopts, fuseopts, &mf_operations, NULL);
 
     mf_destroy();
 
     pthread_mutex_destroy(&lock);
 
-    if (lflag)
-        mf_log_destroy();
+    mf_log_destroy();
 
     return ret;
-
-fatal:
-    mf_log_fatal("main(argc=%d, argv=%p): %s\n", argc, argv, strerror(ret));
-    exit(EXIT_FAILURE);
 }
