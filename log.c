@@ -240,12 +240,7 @@ void mf_log_set_level(int level)
 
 int mf_log_init(int level, const char *filename, const char *mode)
 {
-    int ret;
-
-    ret = mf_log_set_level(level);
-
-    if (ret < 0)
-        return ret;
+    mf_log_set_level(level);
 
     if (log_fh != NULL)
         fclose(log_fh);
