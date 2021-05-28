@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <time.h>
 
+static int log_enabled;
 static int log_level = LOG_ERROR;
 static FILE *log_fh;
 
@@ -138,6 +139,9 @@ static int mf_log_v(int level, const char *fmt, va_list ap)
         break;
     }
 
+    if (!log_enabled)
+        return 0;
+
     return mf_log_vf(log_fh, level, fmt, ap);
 }
 
@@ -229,22 +233,9 @@ int mf_log_parse_level(const char *level)
     return -1;
 }
 
-int mf_log_set_level(int level)
+void mf_log_set_level(int level)
 {
     log_level = level;
-
-    return 0;
-}
-
-int mf_log_set_file(const char *filename, const char *mode)
-{
-    if (log_fh != NULL)
-        fclose(log_fh);
-
-    if ((log_fh = fopen(filename, mode)) == NULL)
-        return -errno;
-
-    return 0;
 }
 
 int mf_log_init(int level, const char *filename, const char *mode)
@@ -256,22 +247,21 @@ int mf_log_init(int level, const char *filename, const char *mode)
     if (ret < 0)
         return ret;
 
-    ret = mf_log_set_file(filename, mode);
+    if (log_fh != NULL)
+        fclose(log_fh);
 
-    if (ret < 0)
-        return ret;
+    if ((log_fh = fopen(filename, mode)) == NULL)
+        return -errno;
+
+    log_enabled = 1;
 
     return 0;
 }
 
-int mf_log_destroy()
+void mf_log_destroy()
 {
-    log_level = LOG_ERROR;
+    log_enabled = 0;
 
     if (log_fh != NULL)
         fclose(log_fh);
-
-    log_fh = NULL;
-
-    return 0;
 }
