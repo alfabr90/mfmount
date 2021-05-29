@@ -1082,10 +1082,10 @@ void mf_destroy()
     free(mf_data->storage);
 
     if (mf_data->filelist != NULL)
-        mf_file_remove(mf_data->filelist->file);
+        mf_file_destroy(mf_data->filelist->file);
 
     free(mf_data->inomap);
-    //free(mf_data->filelist);
+    free(mf_data->filelist);
     free(mf_data->nodetbl);
     free(mf_data->st);
 
