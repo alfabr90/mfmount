@@ -24,8 +24,8 @@ static struct mf_state *mf_data;
 
 static ino_t mf_ino_get_free()
 {
-    int i, j;
-    ino_t ino, len;
+    int j;
+    ino_t i, ino, len;
     unsigned char *map;
 
     mf_log_debug("mf_ino_get_free()\n");
@@ -64,7 +64,8 @@ static ino_t mf_ino_get_free()
 
 static void mf_ino_free(ino_t ino)
 {
-    ino_t i, j;
+    ino_t i;
+    int j;
 
     mf_log_debug("mf_ino_free(ino=%lu)\n", ino);
 
@@ -83,8 +84,8 @@ static void mf_ino_free(ino_t ino)
 
 static struct mf_address *mf_addr_get_free()
 {
-    int i, j;
-    size_t fileno, addrno, len;
+    size_t i, fileno, addrno, len;
+    int j;
     fsblkcnt_t blksize;
     unsigned char *map;
     struct mf_address *addr;
@@ -143,7 +144,8 @@ static struct mf_address *mf_addr_get_free()
 
 static void mf_addr_free(struct mf_address *addr)
 {
-    size_t i, j;
+    size_t i;
+    int j;
 
     mf_log_debug("mf_addr_free(addr=%p)\n", addr);
 
@@ -221,8 +223,8 @@ static struct stat *mf_stat_create(ino_t ino, mode_t mode)
 
     st->st_ino = ino;
     st->st_mode = mode;
-    st->st_uid = getuid();
-    st->st_gid = getgid();
+    st->st_uid = mf_data->uid;
+    st->st_gid = mf_data->gid;
     st->st_atime = t;
     st->st_mtime = t;
     st->st_ctime = t;
@@ -572,7 +574,7 @@ int mf_node_put(ino_t ino, mode_t mode)
 
 ssize_t mf_node_read(char *buf, size_t size, off_t offset, struct mf_node *node)
 {
-    int i;
+    off_t i;
     size_t off;
     ssize_t b_read;
     fsblkcnt_t blksize;
@@ -703,9 +705,8 @@ ssize_t mf_node_write(const char *buf, size_t size, off_t offset, struct mf_node
 
 ssize_t mf_node_resize(struct mf_node *node, size_t size)
 {
-    int i;
+    ssize_t i, ret;
     size_t diff;
-    ssize_t ret;
     fsblkcnt_t blksize;
     char *buf;
     struct mf_blocklist_item *curblock, *nextblock;
@@ -941,6 +942,9 @@ int mf_init(size_t numfiles, const char **filenames)
         mf_log_fatal("Could not allocate file system metadata: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
+
+    mf_data->uid = getuid();
+    mf_data->gid = getgid();
 
     mf_data->numstorages = numfiles;
 
