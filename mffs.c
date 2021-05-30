@@ -24,8 +24,8 @@ static struct mf_state *mf_data;
 
 static ino_t mf_ino_get_free()
 {
-    int i, j;
-    ino_t ino, len;
+    int j;
+    ino_t i, ino, len;
     unsigned char *map;
 
     mf_log_debug("mf_ino_get_free()\n");
@@ -64,7 +64,8 @@ static ino_t mf_ino_get_free()
 
 static void mf_ino_free(ino_t ino)
 {
-    ino_t i, j;
+    ino_t i;
+    int j;
 
     mf_log_debug("mf_ino_free(ino=%lu)\n", ino);
 
@@ -83,15 +84,15 @@ static void mf_ino_free(ino_t ino)
 
 static struct mf_address *mf_addr_get_free()
 {
-    int i, j;
-    size_t fileno, addr, len;
+    size_t i, fileno, addrno, len;
+    int j;
     fsblkcnt_t blksize;
     unsigned char *map;
-    struct mf_address *ret;
+    struct mf_address *addr;
 
     mf_log_debug("mf_addr_get_free()\n");
 
-    addr = -1;
+    addrno = -1;
     len = mf_data->st->f_blocks / CHAR_BIT;
     blksize = mf_data->st->f_bsize;
 
@@ -106,19 +107,19 @@ static struct mf_address *mf_addr_get_free()
         if (map[i] != 0xFF) {
             for (j = 0; j < CHAR_BIT; j++) {
                 if ((unsigned char) (map[i] << j) < 0x80) {
-                    addr = (i * CHAR_BIT + j) * blksize;
+                    addrno = (i * CHAR_BIT + j) * blksize;
                     map[i] = map[i] | (0x1 << (CHAR_BIT - j - 1));
                     break;
                 }
             }
         }
 
-        if (addr != -1)
+        if (addrno != -1)
             break;
     }
     mf_util_mutex_unlock(&lock_addr);
 
-    if (addr == -1) {
+    if (addrno == -1) {
         errno = ENOSPC;
         return NULL;
     }
@@ -128,22 +129,23 @@ static struct mf_address *mf_addr_get_free()
     mf_data->st->f_bavail = mf_data->st->f_bfree;
     mf_util_mutex_unlock(&lock_stat);
 
-    ret = malloc(sizeof(struct mf_address));
+    addr = malloc(sizeof(struct mf_address));
 
-    if (ret == NULL) {
+    if (addr == NULL) {
         mf_log_fatal("Could not allocate address structure: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
-    ret->fileno = fileno;
-    ret->addrno = addr;
+    addr->fileno = fileno;
+    addr->addrno = addrno;
 
-    return ret;
+    return addr;
 }
 
 static void mf_addr_free(struct mf_address *addr)
 {
-    size_t i, j;
+    size_t i;
+    int j;
 
     mf_log_debug("mf_addr_free(addr=%p)\n", addr);
 
@@ -158,6 +160,8 @@ static void mf_addr_free(struct mf_address *addr)
     mf_data->st->f_bfree++;
     mf_data->st->f_bavail = mf_data->st->f_bfree;
     mf_util_mutex_unlock(&lock_stat);
+
+    free(addr);
 }
 
 static struct mf_blocklist_item *mf_blocklist_item_create(struct mf_address *addr)
@@ -219,8 +223,8 @@ static struct stat *mf_stat_create(ino_t ino, mode_t mode)
 
     st->st_ino = ino;
     st->st_mode = mode;
-    st->st_uid = getuid();
-    st->st_gid = getgid();
+    st->st_uid = mf_data->uid;
+    st->st_gid = mf_data->gid;
     st->st_atime = t;
     st->st_mtime = t;
     st->st_ctime = t;
@@ -273,8 +277,10 @@ static struct mf_node *mf_node_create(ino_t ino, mode_t mode)
 
     st = mf_stat_create(ino, mode);
 
-    if (st == NULL)
+    if (st == NULL) {
+        free(node);
         return NULL;
+    }
 
     node->st = st;
 
@@ -339,6 +345,7 @@ static struct mf_file *mf_file_create(const char *name, struct mf_file *parent)
     ino = mf_ino_get_free();
 
     if (ino < 0) {
+        free(file);
         errno = -ino;
         return NULL;
     }
@@ -567,7 +574,7 @@ int mf_node_put(ino_t ino, mode_t mode)
 
 ssize_t mf_node_read(char *buf, size_t size, off_t offset, struct mf_node *node)
 {
-    int i;
+    off_t i;
     size_t off;
     ssize_t b_read;
     fsblkcnt_t blksize;
@@ -698,9 +705,8 @@ ssize_t mf_node_write(const char *buf, size_t size, off_t offset, struct mf_node
 
 ssize_t mf_node_resize(struct mf_node *node, size_t size)
 {
-    int i;
+    ssize_t i, ret;
     size_t diff;
-    ssize_t ret;
     fsblkcnt_t blksize;
     char *buf;
     struct mf_blocklist_item *curblock, *nextblock;
@@ -760,6 +766,9 @@ ssize_t mf_node_resize(struct mf_node *node, size_t size)
             if (diff > 0)
                 ret = mf_node_write(buf, diff, ret * blksize - diff, node);
         }
+
+        if (buf != NULL)
+            free(buf);
 
         if (ret < 0)
             return ret;
@@ -933,6 +942,9 @@ int mf_init(size_t numfiles, const char **filenames)
         mf_log_fatal("Could not allocate file system metadata: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
+
+    mf_data->uid = getuid();
+    mf_data->gid = getgid();
 
     mf_data->numstorages = numfiles;
 

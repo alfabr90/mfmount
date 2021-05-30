@@ -68,6 +68,8 @@ struct mf_storage {
 };
 
 struct mf_state {
+    uid_t uid;
+    gid_t gid;
     size_t numstorages;
     struct statvfs *st;
     unsigned char *inomap;
