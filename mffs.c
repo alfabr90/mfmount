@@ -84,14 +84,14 @@ static void mf_ino_free(ino_t ino)
 static struct mf_address *mf_addr_get_free()
 {
     int i, j;
-    size_t fileno, addr, len;
+    size_t fileno, addrno, len;
     fsblkcnt_t blksize;
     unsigned char *map;
-    struct mf_address *ret;
+    struct mf_address *addr;
 
     mf_log_debug("mf_addr_get_free()\n");
 
-    addr = -1;
+    addrno = -1;
     len = mf_data->st->f_blocks / CHAR_BIT;
     blksize = mf_data->st->f_bsize;
 
@@ -106,19 +106,19 @@ static struct mf_address *mf_addr_get_free()
         if (map[i] != 0xFF) {
             for (j = 0; j < CHAR_BIT; j++) {
                 if ((unsigned char) (map[i] << j) < 0x80) {
-                    addr = (i * CHAR_BIT + j) * blksize;
+                    addrno = (i * CHAR_BIT + j) * blksize;
                     map[i] = map[i] | (0x1 << (CHAR_BIT - j - 1));
                     break;
                 }
             }
         }
 
-        if (addr != -1)
+        if (addrno != -1)
             break;
     }
     mf_util_mutex_unlock(&lock_addr);
 
-    if (addr == -1) {
+    if (addrno == -1) {
         errno = ENOSPC;
         return NULL;
     }
@@ -128,17 +128,17 @@ static struct mf_address *mf_addr_get_free()
     mf_data->st->f_bavail = mf_data->st->f_bfree;
     mf_util_mutex_unlock(&lock_stat);
 
-    ret = malloc(sizeof(struct mf_address));
+    addr = malloc(sizeof(struct mf_address));
 
-    if (ret == NULL) {
+    if (addr == NULL) {
         mf_log_fatal("Could not allocate address structure: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
-    ret->fileno = fileno;
-    ret->addrno = addr;
+    addr->fileno = fileno;
+    addr->addrno = addrno;
 
-    return ret;
+    return addr;
 }
 
 static void mf_addr_free(struct mf_address *addr)
@@ -158,6 +158,8 @@ static void mf_addr_free(struct mf_address *addr)
     mf_data->st->f_bfree++;
     mf_data->st->f_bavail = mf_data->st->f_bfree;
     mf_util_mutex_unlock(&lock_stat);
+
+    free(addr);
 }
 
 static struct mf_blocklist_item *mf_blocklist_item_create(struct mf_address *addr)
@@ -273,8 +275,10 @@ static struct mf_node *mf_node_create(ino_t ino, mode_t mode)
 
     st = mf_stat_create(ino, mode);
 
-    if (st == NULL)
+    if (st == NULL) {
+        free(node);
         return NULL;
+    }
 
     node->st = st;
 
@@ -339,6 +343,7 @@ static struct mf_file *mf_file_create(const char *name, struct mf_file *parent)
     ino = mf_ino_get_free();
 
     if (ino < 0) {
+        free(file);
         errno = -ino;
         return NULL;
     }
@@ -760,6 +765,9 @@ ssize_t mf_node_resize(struct mf_node *node, size_t size)
             if (diff > 0)
                 ret = mf_node_write(buf, diff, ret * blksize - diff, node);
         }
+
+        if (buf != NULL)
+            free(buf);
 
         if (ret < 0)
             return ret;
