@@ -24,6 +24,7 @@ static int mf_access(const char *path, int mask)
     mode_t st_mode;
     uid_t uid, st_uid;
     gid_t gid, st_gid;
+    struct stat *st;
     struct mf_file *file;
     struct mf_node *node;
 
@@ -46,9 +47,11 @@ static int mf_access(const char *path, int mask)
 
     node = mf_node_get(file->ino);
 
-    st_mode = node->st->st_mode;
-    st_uid = node->st->st_uid;
-    st_gid = node->st->st_gid;
+    st = node->st;
+
+    st_mode = st->st_mode;
+    st_uid = st->st_uid;
+    st_gid = st->st_gid;
     mf_util_mutex_unlock(&lock);
 
     if (node != NULL) {
@@ -126,6 +129,7 @@ err:
 static int mf_chmod(const char *path, mode_t mode)
 {
     int ret;
+    struct stat *st;
     struct mf_file *file;
     struct mf_node *node;
 
@@ -148,8 +152,10 @@ static int mf_chmod(const char *path, mode_t mode)
 
     node = mf_node_get(file->ino);
 
-    node->st->st_mode = mode;
-    node->st->st_ctime = time(NULL);
+    st = node->st;
+
+    st->st_mode = mode;
+    st->st_ctime = time(NULL);
     mf_util_mutex_unlock(&lock);
 
     return ret;
@@ -164,6 +170,7 @@ err:
 static int mf_chown(const char *path, uid_t uid, gid_t gid)
 {
     int ret;
+    struct stat *st;
     struct mf_file *file;
     struct mf_node *node;
 
@@ -186,9 +193,11 @@ static int mf_chown(const char *path, uid_t uid, gid_t gid)
 
     node = mf_node_get(file->ino);
 
-    node->st->st_uid = uid;
-    node->st->st_gid = gid;
-    node->st->st_ctime = time(NULL);
+    st = node->st;
+
+    st->st_uid = uid;
+    st->st_gid = gid;
+    st->st_ctime = time(NULL);
     mf_util_mutex_unlock(&lock);
 
     return ret;
@@ -203,6 +212,7 @@ err:
 static int mf_utimens(const char *path, const struct timespec ts[2])
 {
     int ret;
+    struct stat *st;
     struct mf_file *file;
     struct mf_node *node;
 
@@ -225,9 +235,11 @@ static int mf_utimens(const char *path, const struct timespec ts[2])
 
     node = mf_node_get(file->ino);
 
-    node->st->st_atime = ts[0].tv_sec;
-    node->st->st_mtime = ts[1].tv_sec;
-    node->st->st_ctime = time(NULL);
+    st = node->st;
+
+    st->st_atime = ts[0].tv_sec;
+    st->st_mtime = ts[1].tv_sec;
+    st->st_ctime = time(NULL);
     mf_util_mutex_unlock(&lock);
 
     return ret;
@@ -685,6 +697,7 @@ static int mf_truncate(const char *path, off_t size)
 {
     int ret;
     time_t t;
+    struct stat *st;
     struct mf_file *file;
     struct mf_node *node;
 
@@ -707,7 +720,9 @@ static int mf_truncate(const char *path, off_t size)
 
     node = mf_node_get(file->ino);
 
-    if (S_ISDIR(node->st->st_mode)) {
+    st = node->st;
+
+    if (S_ISDIR(st->st_mode)) {
         ret = -EISDIR;
         goto err_unlock;
     }
@@ -718,8 +733,8 @@ static int mf_truncate(const char *path, off_t size)
 
     t = time(NULL);
 
-    node->st->st_mtime = t;
-    node->st->st_ctime = t;
+    st->st_mtime = t;
+    st->st_ctime = t;
     mf_node_unlock(NODE_LOCKMODE_W, node);
 
     if (ret < 0)
@@ -740,6 +755,7 @@ static int mf_rename(const char *path, const char *newpath)
     time_t t;
     char *name;
     const char *delim;
+    struct stat *oldst, *newst;
     struct mf_file *oldfile, *newfile, *newfileparent;
     struct mf_node *oldnode, *newnode, *oldnodeparent, *newnodeparent;
     struct mf_blocklist_item *item;
@@ -779,6 +795,8 @@ static int mf_rename(const char *path, const char *newpath)
 
     oldnode = mf_node_get(oldfile->ino);
 
+    oldst = oldnode->st;
+
     oldnodeparent = mf_node_get(oldfile->parent->ino);
     newnodeparent = mf_node_get(newfileparent->ino);
 
@@ -790,7 +808,7 @@ static int mf_rename(const char *path, const char *newpath)
     delim = DIR_DELIMITER;
 
     // TODO: consider links, pipes etc
-    if (S_ISDIR(oldnode->st->st_mode) || S_ISREG(oldnode->st->st_mode)) {
+    if (S_ISDIR(oldst->st_mode) || S_ISREG(oldst->st_mode)) {
         if (newfile == NULL) {
             name = mf_util_filename_from_path(newpath, delim);
 
@@ -803,7 +821,7 @@ static int mf_rename(const char *path, const char *newpath)
 
             newfile = mf_file_find(newpath);
 
-            ret = mf_node_put(newfile->ino, oldnode->st->st_mode);
+            ret = mf_node_put(newfile->ino, oldst->st_mode);
 
             if (ret < 0) {
                 mf_file_remove(newfile);
@@ -813,8 +831,10 @@ static int mf_rename(const char *path, const char *newpath)
             newnode = mf_node_get(newfile->ino);
         }
 
-        if (S_ISDIR(oldnode->st->st_mode)) {
-            if (S_ISDIR(newnode->st->st_mode)) {
+        newst = newnode->st;
+
+        if (S_ISDIR(oldst->st_mode)) {
+            if (S_ISDIR(newst->st_mode)) {
                 if (newfile->filelist != NULL) {
                     ret = -ENOTEMPTY;
                     goto err_unlock;
@@ -824,10 +844,10 @@ static int mf_rename(const char *path, const char *newpath)
                 goto err_unlock;
             }
 
-            newnode->st->st_mtime = t;
-            newnode->st->st_ctime = t;
-        } else if (S_ISREG(oldnode->st->st_mode)) {
-            if (!S_ISREG(newnode->st->st_mode)) {
+            newst->st_mtime = t;
+            newst->st_ctime = t;
+        } else if (S_ISREG(oldst->st_mode)) {
+            if (!S_ISREG(newst->st_mode)) {
                 ret = -EISDIR;
                 goto err_unlock;
             }
@@ -838,10 +858,10 @@ static int mf_rename(const char *path, const char *newpath)
             newnode->blocklist = oldnode->blocklist;
             oldnode->blocklist = item;
 
-            newnode->st->st_size = oldnode->st->st_size;
-            newnode->st->st_blocks = oldnode->st->st_blocks;
+            newst->st_size = oldst->st_size;
+            newst->st_blocks = oldst->st_blocks;
 
-            newnode->st->st_ctime = t;
+            newst->st_ctime = t;
             mf_node_unlock(NODE_LOCKMODE_W, oldnode);
             mf_node_unlock(NODE_LOCKMODE_W, newnode);
         }
@@ -853,11 +873,15 @@ static int mf_rename(const char *path, const char *newpath)
     mf_file_remove(oldfile);
     mf_node_remove(oldnode);
 
-    oldnodeparent->st->st_mtime = t;
-    oldnodeparent->st->st_ctime = t;
+    oldst = oldnodeparent->st;
 
-    newnodeparent->st->st_mtime = t;
-    newnodeparent->st->st_ctime = t;
+    oldst->st_mtime = t;
+    oldst->st_ctime = t;
+
+    newst = newnodeparent->st;
+
+    newst->st_mtime = t;
+    newst->st_ctime = t;
     mf_util_mutex_unlock(&lock);
 
     return ret;

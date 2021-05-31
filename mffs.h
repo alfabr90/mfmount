@@ -61,18 +61,35 @@ struct mf_filelist_item {
     struct mf_filelist_item *next;
 };
 
+struct mf_addrmap {
+    size_t page;
+    int bit;
+    size_t len;
+    unsigned char *map;
+    pthread_mutex_t lock;
+};
+
 struct mf_storage {
-    unsigned char *addrmap;
+    struct mf_addrmap *addrmap;
     pthread_mutex_t lock;
     FILE *fh;
+};
+
+struct mf_inomap {
+    ino_t page;
+    int bit;
+    ino_t len;
+    unsigned char *map;
+    pthread_mutex_t lock;
 };
 
 struct mf_state {
     uid_t uid;
     gid_t gid;
+    size_t curstorage;
     size_t numstorages;
     struct statvfs *st;
-    unsigned char *inomap;
+    struct mf_inomap *inomap;
     struct mf_filelist_item *filelist;
     struct mf_nodelist_item **nodetbl;
     struct mf_storage **storage;
