@@ -114,12 +114,10 @@ static struct mf_address *mf_addr_get_free()
 
     mf_util_mutex_lock(&lock_addr);
     // TODO: improve free address policy
-    fileno = mf_data->curstorage;
+    if (mf_data->curstorage == mf_data->numstorages)
+        mf_data->curstorage = 0;
 
-    if (fileno == 0)
-        mf_data->curstorage++;
-    else
-        mf_data->curstorage %= mf_data->numstorages;
+    fileno = mf_data->curstorage++;
     mf_util_mutex_unlock(&lock_addr);
 
     addrmap = mf_data->storage[fileno]->addrmap;
@@ -1028,7 +1026,7 @@ int mf_init(size_t numfiles, const char **filenames)
 
         addrmap->page = 0;
         addrmap->bit = -1;
-        addrmap->len = size / ((size_t) BLOCK_SIZE / CHAR_BIT);
+        addrmap->len = size / BLOCK_SIZE / CHAR_BIT;
         addrmap->map = calloc(addrmap->len, sizeof(unsigned char));
 
         if (addrmap->map == NULL) {
@@ -1059,7 +1057,7 @@ int mf_init(size_t numfiles, const char **filenames)
 
     inomap->page = 0;
     inomap->bit = -1;
-    inomap->len = INO_MAX / ((size_t) CHAR_BIT);
+    inomap->len = INO_MAX / CHAR_BIT;
     inomap->map = calloc(inomap->len, sizeof(unsigned char));
 
     if (inomap->map == NULL) {
