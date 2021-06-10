@@ -25,16 +25,18 @@ static ino_t mf_ino_get_free()
     int j;
     unsigned char *map;
     struct mf_inomap *inomap;
+    pthread_mutex_t *lock;
 
     ino = -1;
 
     mf_log_debug("mf_ino_get_free()\n");
 
     inomap = mf_data->inomap;
+    lock = &(inomap->lock);
     len = inomap->len;
     map = inomap->map;
 
-    mf_util_mutex_lock(&(inomap->lock));
+    mf_util_mutex_lock(lock);
     i = inomap->page;
     j = inomap->bit;
 
@@ -59,7 +61,7 @@ static ino_t mf_ino_get_free()
         map[i] = map[i] | (0x1 << (CHAR_BIT - j - 1));
         inomap->bit = -1;
     }
-    mf_util_mutex_unlock(&(inomap->lock));
+    mf_util_mutex_unlock(lock);
 
     if (ino == -1)
         return -EDQUOT;
@@ -77,18 +79,20 @@ static void mf_ino_free(ino_t ino)
     ino_t i;
     int j;
     struct mf_inomap *inomap;
+    pthread_mutex_t *lock;
 
     mf_log_debug("mf_ino_free(ino=%lu)\n", ino);
 
     i = ino / CHAR_BIT;
     j = ino % CHAR_BIT;
     inomap = mf_data->inomap;
+    lock = &(inomap->lock);
 
-    mf_util_mutex_lock(&(inomap->lock));
+    mf_util_mutex_lock(lock);
     inomap->map[i] = inomap->map[i] & ~(0x1 << (CHAR_BIT - j - 1));
     inomap->page = i;
     inomap->bit = j;
-    mf_util_mutex_unlock(&(inomap->lock));
+    mf_util_mutex_unlock(lock);
 
     mf_util_mutex_lock(&lock_stat);
     mf_data->st->f_ffree++;
@@ -105,6 +109,7 @@ static struct mf_address *mf_addr_get_free()
     struct statvfs *st;
     struct mf_address *addr;
     struct mf_addrmap *addrmap;
+    pthread_mutex_t *lock;
 
     mf_log_debug("mf_addr_get_free()\n");
 
@@ -121,8 +126,9 @@ static struct mf_address *mf_addr_get_free()
     mf_util_mutex_unlock(&lock_addr);
 
     addrmap = mf_data->storage[fileno]->addrmap;
+    lock = &(addrmap->lock);
 
-    mf_util_mutex_lock(&(addrmap->lock));
+    mf_util_mutex_lock(lock);
     i = addrmap->page;
     j = addrmap->bit;
     len = addrmap->len;
@@ -149,7 +155,7 @@ static struct mf_address *mf_addr_get_free()
         map[i] = map[i] | (0x1 << (CHAR_BIT - j - 1));
         addrmap->bit = -1;
     }
-    mf_util_mutex_unlock(&(addrmap->lock));
+    mf_util_mutex_unlock(lock);
 
     if (addrno == -1) {
         errno = ENOSPC;
@@ -180,6 +186,7 @@ static void mf_addr_free(struct mf_address *addr)
     int j;
     struct statvfs *st;
     struct mf_addrmap *addrmap;
+    pthread_mutex_t *lock;
 
     mf_log_debug("mf_addr_free(addr=%p)\n", addr);
 
@@ -187,12 +194,13 @@ static void mf_addr_free(struct mf_address *addr)
     i = addr->addrno / st->f_bsize / CHAR_BIT;
     j = addr->addrno / st->f_bsize % CHAR_BIT;
     addrmap = mf_data->storage[addr->fileno]->addrmap;
+    lock = &(addrmap->lock);
 
-    mf_util_mutex_lock(&(addrmap->lock));
+    mf_util_mutex_lock(lock);
     addrmap->map[i] = addrmap->map[i] & ~(0x1 << (CHAR_BIT - j - 1));
     addrmap->page = i;
     addrmap->bit = j;
-    mf_util_mutex_unlock(&(addrmap->lock));
+    mf_util_mutex_unlock(lock);
 
     mf_util_mutex_lock(&lock_stat);
     st->f_bfree++;
@@ -279,6 +287,8 @@ static struct stat *mf_stat_create(ino_t ino, mode_t mode)
 static void mf_node_destroy(struct mf_node *node)
 {
     struct mf_blocklist_item *curblock, *nextblock;
+
+    mf_log_debug("mf_node_destroy(node=%p)\n", node);
 
     curblock = node->blocklist;
 
@@ -619,6 +629,7 @@ ssize_t mf_node_read(char *buf, size_t size, off_t offset, struct mf_node *node)
     struct mf_blocklist_item *item;
     struct mf_storage *storage;
     struct mf_address *addr;
+    pthread_mutex_t *lock;
     FILE* fh;
 
     mf_log_debug("mf_node_read(size=%lu, offset=%lu, node=%p)\n", size, offset, node);
@@ -636,21 +647,22 @@ ssize_t mf_node_read(char *buf, size_t size, off_t offset, struct mf_node *node)
     while (item != NULL && b_read < size) {
         addr = item->addr;
         storage = mf_data->storage[addr->fileno];
+        lock = &(storage->lock);
         fh = storage->fh;
 
-        mf_util_mutex_lock(&(storage->lock));
+        mf_util_mutex_lock(lock);
         // TODO: improve seeking of file's position
         fseek(fh, addr->addrno + off, SEEK_SET);
 
         off = fread(buf, sizeof(char), mf_util_min(size - (size_t) b_read, blksize - off), fh);
 
         if (ferror(fh)) {
-            mf_util_mutex_unlock(&(storage->lock));
+            mf_util_mutex_unlock(lock);
 
             b_read = -EIO;
             break;
         }
-        mf_util_mutex_unlock(&(storage->lock));
+        mf_util_mutex_unlock(lock);
 
         buf += off;
         b_read += off;
@@ -668,9 +680,11 @@ ssize_t mf_node_write(const char *buf, size_t size, off_t offset, struct mf_node
     size_t off;
     ssize_t b_written;
     fsblkcnt_t blksize;
+    struct stat *st;
     struct mf_blocklist_item *item;
     struct mf_storage *storage;
     struct mf_address *addr;
+    pthread_mutex_t *lock;
     FILE* fh;
 
     fh = NULL;
@@ -679,6 +693,7 @@ ssize_t mf_node_write(const char *buf, size_t size, off_t offset, struct mf_node
 
     blksize = mf_data->st->f_bsize;
     item = node->blocklist;
+    st = node->st;
 
     for (i = 0; i < offset / (off_t) blksize; item = item->next, i++)
         ;
@@ -704,29 +719,30 @@ ssize_t mf_node_write(const char *buf, size_t size, off_t offset, struct mf_node
 
             mf_blocklist_item_add(node, item);
 
-            node->st->st_blocks += blksize / 512;
+            st->st_blocks += blksize / 512;
         } else {
             addr = item->addr;
         }
 
         storage = mf_data->storage[addr->fileno];
+        lock = &(storage->lock);
         fh = storage->fh;
 
-        mf_util_mutex_lock(&(storage->lock));
+        mf_util_mutex_lock(lock);
         // TODO: improve seeking of file's position
         fseek(fh, addr->addrno + off, SEEK_SET);
 
         off = fwrite(buf, sizeof(char), mf_util_min(size - (size_t) b_written, blksize - off), fh);
 
-        node->st->st_size += off;
+        st->st_size += off;
 
         if (ferror(fh)) {
-            mf_util_mutex_unlock(&(storage->lock));
+            mf_util_mutex_unlock(lock);
 
             b_written = -EIO;
             break;
         }
-        mf_util_mutex_unlock(&(storage->lock));
+        mf_util_mutex_unlock(lock);
 
         buf += off;
         b_written += off;
@@ -747,6 +763,7 @@ ssize_t mf_node_resize(struct mf_node *node, size_t size)
     size_t diff;
     fsblkcnt_t blksize;
     char *buf;
+    struct stat *st;
     struct mf_blocklist_item *curblock, *nextblock;
 
     mf_log_debug("mf_node_resize(node=%p, size=%lu)\n", node, size);
@@ -754,10 +771,11 @@ ssize_t mf_node_resize(struct mf_node *node, size_t size)
     ret = 0;
 
     blksize = mf_data->st->f_bsize;
+    st = node->st;
 
-    if (node->st->st_size != size) {
-        if (node->st->st_size < size) {
-            diff = size - node->st->st_size;
+    if (st->st_size != size) {
+        if (st->st_size < size) {
+            diff = size - st->st_size;
 
             if (!mf_has_availspace(diff))
                 return -ENOSPC;
@@ -769,7 +787,7 @@ ssize_t mf_node_resize(struct mf_node *node, size_t size)
                 exit(EXIT_FAILURE);
             }
 
-            ret = mf_node_write(buf, diff, node->st->st_size, node);
+            ret = mf_node_write(buf, diff, st->st_size, node);
         } else {
             diff = 0;
             buf = NULL;
@@ -811,7 +829,7 @@ ssize_t mf_node_resize(struct mf_node *node, size_t size)
         if (ret < 0)
             return ret;
 
-        node->st->st_size = size;
+        st->st_size = size;
     }
 
     return ret;
@@ -820,6 +838,7 @@ ssize_t mf_node_resize(struct mf_node *node, size_t size)
 int mf_node_lock(int mode, struct mf_node *node)
 {
     int ret;
+    pthread_mutex_t *lock;
 
     ret = 0;
 
@@ -835,15 +854,17 @@ int mf_node_lock(int mode, struct mf_node *node)
         goto err;
     }
 
-    mf_util_mutex_lock(&(node->lock));
+    lock = &(node->lock);
+
+    mf_util_mutex_lock(lock);
     while (node->writing || (mode & NODE_LOCKMODE_W && node->reading))
-        mf_util_cond_wait(&(node->cond), &(node->lock));
+        mf_util_cond_wait(&(node->cond), lock);
 
     if (mode & NODE_LOCKMODE_R)
         node->reading++;
     else if (mode & NODE_LOCKMODE_W)
         node->writing = 1;
-    mf_util_mutex_unlock(&(node->lock));
+    mf_util_mutex_unlock(lock);
 
     return ret;
 
@@ -855,6 +876,7 @@ err:
 int mf_node_unlock(int mode, struct mf_node *node)
 {
     int ret;
+    pthread_mutex_t *lock;
 
     ret = 0;
 
@@ -870,13 +892,15 @@ int mf_node_unlock(int mode, struct mf_node *node)
         goto err;
     }
 
-    mf_util_mutex_lock(&(node->lock));
+    lock = &(node->lock);
+
+    mf_util_mutex_lock(lock);
     if (mode & NODE_LOCKMODE_R)
         node->reading--;
     else if (mode & NODE_LOCKMODE_W)
         node->writing = 0;
     mf_util_cond_signal(&(node->cond));
-    mf_util_mutex_unlock(&(node->lock));
+    mf_util_mutex_unlock(lock);
 
     return ret;
 
