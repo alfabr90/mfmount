@@ -374,6 +374,7 @@ static int mf_opendir(const char *path, struct fuse_file_info *fi)
     int ret;
     struct mf_file *file;
     struct mf_node *node;
+    pthread_mutex_t *nodelock;
 
     ret = 0;
 
@@ -393,14 +394,15 @@ static int mf_opendir(const char *path, struct fuse_file_info *fi)
     }
 
     node = mf_node_get(file->ino);
+    nodelock = &(node->lock);
 
     // TODO: consider absence of FUSE's `default_permission` option in order to check permissions
     mf_util_mutex_unlock(&lock);
 
-    mf_util_mutex_lock(&(node->lock));
+    mf_util_mutex_lock(nodelock);
     node->open++;
     node->st->st_atime = time(NULL);
-    mf_util_mutex_unlock(&(node->lock));
+    mf_util_mutex_unlock(nodelock);
 
     return ret;
 
@@ -416,6 +418,7 @@ static int mf_rmdir(const char *path)
     int ret;
     struct mf_file *file;
     struct mf_node *node;
+    pthread_mutex_t *nodelock;
 
     ret = 0;
 
@@ -435,17 +438,18 @@ static int mf_rmdir(const char *path)
     }
 
     node = mf_node_get(file->ino);
+    nodelock = &(node->lock);
 
     mf_file_remove(file);
     mf_util_mutex_unlock(&lock);
 
-    mf_util_mutex_lock(&(node->lock));
+    mf_util_mutex_lock(nodelock);
     node->remove = 1;
 
     if (node->open == 0)
         mf_node_remove(node);
     else
-        mf_util_mutex_unlock(&(node->lock));
+        mf_util_mutex_unlock(nodelock);
 
     return ret;
 
@@ -461,6 +465,7 @@ static int mf_releasedir(const char *path, struct fuse_file_info *fi)
     int ret;
     struct mf_file *file;
     struct mf_node *node;
+    pthread_mutex_t *nodelock;
 
     ret = 0;
 
@@ -480,15 +485,16 @@ static int mf_releasedir(const char *path, struct fuse_file_info *fi)
     }
 
     node = mf_node_get(file->ino);
+    nodelock = &(node->lock);
     mf_util_mutex_unlock(&lock);
 
-    mf_util_mutex_lock(&(node->lock));
+    mf_util_mutex_lock(nodelock);
     node->open--;
 
     if (node->remove == 1 && node->open == 0)
         mf_node_remove(node);
     else
-        mf_util_mutex_unlock(&(node->lock));
+        mf_util_mutex_unlock(nodelock);
 
     return ret;
 
@@ -563,6 +569,7 @@ static int mf_open(const char *path, struct fuse_file_info *fi)
     int ret;
     struct mf_file *file;
     struct mf_node *node;
+    pthread_mutex_t *nodelock;
 
     ret = 0;
 
@@ -582,14 +589,14 @@ static int mf_open(const char *path, struct fuse_file_info *fi)
     }
 
     node = mf_node_get(file->ino);
-
+    nodelock = &(node->lock);
     // TODO: consider absence of FUSE's `default_permission` option in order to check permissions
     mf_util_mutex_unlock(&lock);
 
-    mf_util_mutex_lock(&(node->lock));
+    mf_util_mutex_lock(nodelock);
     node->open++;
     node->st->st_atime = time(NULL);
-    mf_util_mutex_unlock(&(node->lock));
+    mf_util_mutex_unlock(nodelock);
 
     return ret;
 
@@ -898,6 +905,7 @@ static int mf_unlink(const char *path)
     int ret;
     struct mf_file *file;
     struct mf_node *node;
+    pthread_mutex_t *nodelock;
 
     ret = 0;
 
@@ -917,17 +925,18 @@ static int mf_unlink(const char *path)
     }
 
     node = mf_node_get(file->ino);
+    nodelock = &(node->lock);
 
     mf_file_remove(file);
     mf_util_mutex_unlock(&lock);
 
-    mf_util_mutex_lock(&(node->lock));
+    mf_util_mutex_lock(nodelock);
     node->remove = 1;
 
     if (node->open == 0)
         mf_node_remove(node);
     else
-        mf_util_mutex_unlock(&(node->lock));
+        mf_util_mutex_unlock(nodelock);
 
     return ret;
 
@@ -943,6 +952,7 @@ static int mf_release(const char *path, struct fuse_file_info *fi)
     int ret;
     struct mf_file *file;
     struct mf_node *node;
+    pthread_mutex_t *nodelock;
 
     ret = 0;
 
@@ -962,15 +972,16 @@ static int mf_release(const char *path, struct fuse_file_info *fi)
     }
 
     node = mf_node_get(file->ino);
+    nodelock = &(node->lock);
     mf_util_mutex_unlock(&lock);
 
-    mf_util_mutex_lock(&(node->lock));
+    mf_util_mutex_lock(nodelock);
     node->open--;
 
     if (node->remove == 1 && node->open == 0)
         mf_node_remove(node);
     else
-        mf_util_mutex_unlock(&(node->lock));
+        mf_util_mutex_unlock(nodelock);
 
     return ret;
 
