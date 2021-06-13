@@ -286,6 +286,7 @@ static struct stat *mf_stat_create(ino_t ino, mode_t mode)
 
 static void mf_node_destroy(struct mf_node *node)
 {
+    struct stat *st;
     struct mf_blocklist_item *curblock, *nextblock;
 
     mf_log_debug("mf_node_destroy(node=%p)\n", node);
@@ -299,9 +300,11 @@ static void mf_node_destroy(struct mf_node *node)
         curblock = nextblock;
     }
 
-    mf_ino_free(node->st->st_ino);
+    st = node->st;
 
-    free(node->st);
+    mf_ino_free(st->st_ino);
+
+    free(st);
 
     pthread_mutex_destroy(&(node->lock));
     pthread_cond_destroy(&(node->cond));
@@ -751,8 +754,9 @@ ssize_t mf_node_write(const char *buf, size_t size, off_t offset, struct mf_node
         item = item->next;
     }
 
-    if (fh != NULL)
-        fflush(fh);
+    // TODO: check whether avoiding constant flushing is faster
+    // if (fh != NULL)
+    //     fflush(fh);
 
     return b_written;
 }
