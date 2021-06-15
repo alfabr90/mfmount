@@ -7,6 +7,8 @@
 #include <errno.h>
 #include <time.h>
 
+#include "util.h"
+
 static int log_enabled;
 static int log_level = LOG_ERROR;
 static FILE *log_fh;
@@ -30,41 +32,12 @@ static char *mf_log_getlevel(int level)
     }
 }
 
-static char *mf_log_gettime()
-{
-    size_t len;
-    struct timespec ts;
-    struct tm brokendown;
-    char *time_str, *nano_str;
-
-    if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
-        return NULL;
-
-    localtime_r(&(ts.tv_sec), &brokendown);
-
-    len = 24; // "YYYY-MM-DD HH:MM:SS,000\0"
-
-    time_str = malloc(len * sizeof(char));
-
-    if (time_str == NULL)
-        return NULL;
-
-    strftime(time_str, (len - 4) * sizeof(char), "%F %T", &brokendown); // "YYYY-MM-DD HH:MM:SS\0"
-
-    nano_str = time_str + 19; // "YYYY-MM-DD HH:MM:SS\0"
-
-    sprintf(nano_str, ",%03d", (int) (ts.tv_nsec / 1000000));
-
-    time_str[len - 1] = '\0';
-
-    return time_str;
-}
-
 static int mf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
 {
     int p;
     size_t level_len, time_len, fmt_len;
     char *log_msg, *log_level_str, *log_time, *tmp;
+    struct timespec *ts;
 
     if (fh == NULL)
         return 0;
@@ -82,7 +55,14 @@ static int mf_log_vf(FILE *fh, int level, const char *fmt, va_list ap)
     if (log_level_str == NULL)
         return -errno;
 
-    log_time = mf_log_gettime();
+    ts = mf_util_gettime();
+
+    if (ts == NULL)
+        return -errno;
+
+    log_time = mf_util_formattime(ts);
+
+    free(ts);
 
     if (log_time == NULL)
         return -errno;
