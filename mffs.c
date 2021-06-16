@@ -191,7 +191,7 @@ static void mf_addr_free(struct mf_address *addr)
     mf_log_debug("mf_addr_free(addr=%p)\n", addr);
 
     st = mf_data->st;
-    i = addr->addrno / st->f_bsize / CHAR_BIT;
+    i = addr->addrno / (st->f_bsize * CHAR_BIT);
     j = addr->addrno / st->f_bsize % CHAR_BIT;
     addrmap = mf_data->storage[addr->fileno]->addrmap;
     lock = &(addrmap->lock);
@@ -258,7 +258,7 @@ static struct stat *mf_stat_create(ino_t ino, mode_t mode)
 
     mf_log_debug("mf_stat_create(ino=%lu, mode=%u)\n", ino, mode);
 
-    st = malloc(sizeof(struct stat));
+    st = calloc(1, sizeof(struct stat));
 
     if (st == NULL) {
         mf_log_fatal("Could not allocate stat: %s\n", strerror(errno));
@@ -274,12 +274,12 @@ static struct stat *mf_stat_create(ino_t ino, mode_t mode)
     st->st_atime = t;
     st->st_mtime = t;
     st->st_ctime = t;
-    st->st_size = 0;
+    // st->st_size = 0;
     st->st_blksize = mf_data->st->f_bsize;
-    st->st_blocks = 0;
-    st->st_dev = 0;
-    st->st_rdev = 0;
-    st->st_nlink = 0;
+    // st->st_blocks = 0;
+    // st->st_dev = 0;
+    // st->st_rdev = 0;
+    // st->st_nlink = 0;
 
     return st;
 }
@@ -1100,14 +1100,14 @@ int mf_init(size_t numfiles, const char **filenames)
 
     mf_data->inomap = inomap;
 
-    mf_data->nodetbl = calloc(INO_TBL_SIZE, sizeof(struct mf_nodelist_item **));
+    mf_data->nodetbl = malloc(INO_TBL_SIZE * sizeof(struct mf_nodelist_item **));
 
     if (mf_data->nodetbl == NULL) {
         mf_log_fatal("Could not allocate file system nodes table: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
-    st = malloc(sizeof(struct statvfs));
+    st = calloc(1, sizeof(struct statvfs));
 
     if (st == NULL) {
         mf_log_fatal("Could not allocate file system stats structure: %s\n", strerror(errno));
@@ -1138,6 +1138,7 @@ int mf_init(size_t numfiles, const char **filenames)
     mf_data->filelist = mf_filelist_item_create(rootfile);
 
     if (mf_data->filelist == NULL) {
+        mf_file_destroy(rootfile);
         ret = -errno;
         goto err;
     }
@@ -1167,8 +1168,11 @@ err:
 void mf_destroy()
 {
     size_t i;
+    struct mf_filelist_item *filelist;
     struct mf_nodelist_item *curitem, *nextitem;
     struct mf_storage *storage;
+    struct mf_addrmap *addrmap;
+    struct mf_inomap *inomap;
 
     mf_log_debug("mf_destroy()\n");
 
@@ -1182,16 +1186,20 @@ void mf_destroy()
         }
     }
 
+    free(mf_data->nodetbl);
+
     for (i = 0; i < mf_data->numstorages; i++) {
         storage = mf_data->storage[i];
 
         if (storage->fh != NULL)
             fclose(storage->fh);
 
-        pthread_mutex_destroy(&(storage->addrmap->lock));
+        addrmap = storage->addrmap;
 
-        free(storage->addrmap->map);
-        free(storage->addrmap);
+        pthread_mutex_destroy(&(addrmap->lock));
+
+        free(addrmap->map);
+        free(addrmap);
 
         pthread_mutex_destroy(&(storage->lock));
 
@@ -1200,17 +1208,20 @@ void mf_destroy()
 
     free(mf_data->storage);
 
-    if (mf_data->filelist != NULL)
-        mf_file_destroy(mf_data->filelist->file);
+    filelist = mf_data->filelist;
 
-    free(mf_data->filelist);
+    if (filelist != NULL)
+        mf_file_destroy(filelist->file);
 
-    pthread_mutex_destroy(&(mf_data->inomap->lock));
+    free(filelist);
 
-    free(mf_data->inomap->map);
-    free(mf_data->inomap);
+    inomap = mf_data->inomap;
 
-    free(mf_data->nodetbl);
+    pthread_mutex_destroy(&(inomap->lock));
+
+    free(inomap->map);
+    free(inomap);
+
     free(mf_data->st);
 
     pthread_mutex_destroy(&lock_addr);
