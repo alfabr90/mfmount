@@ -1030,22 +1030,31 @@ err:
     return ret;
 }
 
-static void mf_show_usage()
+static void mf_show_usage(const char *error)
 {
-    printf("FUSE driver for mounting a multi-file file system.\n");
-    printf("\nUsage:\n");
-    printf("  mfmount <file> <file>... <mount>\n");
-    printf("  mfmount <file> <file>... <mount> -l [--loglevel=<level>] [--logfile=<file>]\n");
-    printf("  mfmount -h | --help\n");
-    printf("  mfmount --version\n");
-    printf("\nOptions:\n");
-    printf("  -l                    Enable log.\n");
-    printf("  -h --help             Show this screen.\n");
-    printf("  --version             Show version.\n");
-    printf("  --loglevel=<level>    Define the log level [DEBUG|WARN|INFO|ERROR|FATAL] [default: ERROR].\n");
-    printf("  --logfile=<file>      Define the file where log messages will be written into.\n");
+    int status;
+    FILE *fh;
 
-    exit(EXIT_SUCCESS);
+    if (error == NULL) {
+        status = EXIT_SUCCESS;
+        fh = stdout;
+    } else {
+        status = EXIT_FAILURE;
+        fh = stderr;
+        fprintf(fh, "mfmount: %s\n\n", error);
+    }
+
+    fprintf(fh, "FUSE driver for mounting a multi-file file system.\n");
+    fprintf(fh, "\nUsage:\n");
+    fprintf(fh, "  mfmount [options] [fuseoptions] -- <file>... <mount>\n");
+    fprintf(fh, "\nOptions:\n");
+    fprintf(fh, "  -l                    Enable log.\n");
+    fprintf(fh, "  -h --help             Show this screen.\n");
+    fprintf(fh, "  --version             Show version.\n");
+    fprintf(fh, "  --loglevel=<level>    Define the log level [DEBUG|WARN|INFO|ERROR|FATAL] [default: ERROR].\n");
+    fprintf(fh, "  --logfile=<file>      Define the file where log messages will be written into [default: ./mfmount.log].\n");
+
+    exit(status);
 }
 
 static void mf_show_version()
@@ -1055,9 +1064,9 @@ static void mf_show_version()
     exit(EXIT_SUCCESS);
 }
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
-    int i, ret, lflag, loglevel, numfuseopts, numfilenames;
+    int i, ret, lflag, fsep, loglevel, numfuseopts, numfilenames;
     char **fuseopts;
     const char *logfile, **filenames;
     struct fuse_operations mf_operations = {
@@ -1083,51 +1092,60 @@ int main(int argc, char** argv)
     };
 
     lflag = 0;
+    fsep = 0;
     loglevel = LOG_ERROR;
-    logfile = "./log.txt";
+    logfile = "./mfmount.log";
     numfuseopts = 0;
     numfilenames = 0;
 
     // TODO: check for suid to avoid privilege escalations
+    // TODO: consider FUSE command-line options and configurations
 
-    if (argc < 3)
-        mf_show_usage();
-
-    // TODO: accept FUSE options
-    // For now, only argv[0] and the mounting point is passed in to `fuse_main`
-    fuseopts = calloc(2, sizeof(const char *));
+    fuseopts = calloc(argc - 1, sizeof(const char *));
 
     if (fuseopts == NULL) {
-        mf_log_fatal("Could not allocate fuse options array: %s\n", strerror(errno));
+        perror("Could not allocate fuse options array");
         exit(EXIT_FAILURE);
     }
 
     filenames = calloc(argc - 1, sizeof(const char *));
 
     if (filenames == NULL) {
-        mf_log_fatal("Could not allocate file names array: %s\n", strerror(errno));
+        perror("Could not allocate file names array");
         exit(EXIT_FAILURE);
     }
 
     i = 0;
+    // argv[0] is passed in to `fuse_main`
     fuseopts[numfuseopts++] = argv[i++];
 
     while (i < argc) {
-        if (strcmp(argv[i], "-l") == 0) {
-            lflag = 1;
-        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            mf_show_usage();
-        } else if (strcmp(argv[i], "--version") == 0) {
-            mf_show_version();
-        } else if (strncmp(argv[i], "--loglevel=", 11) == 0) {
-            loglevel = mf_log_parse_level(argv[i] + 11);
+        if (!fsep) {
+            if (strcmp(argv[i], "--") == 0) {
+                fsep = 1;
+            } else if (strcmp(argv[i], "-l") == 0) {
+                lflag = 1;
+            } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+                mf_show_usage(NULL);
+            } else if (strcmp(argv[i], "--version") == 0) {
+                mf_show_version();
+            } else if (strncmp(argv[i], "--loglevel=", 11) == 0) {
+                loglevel = mf_log_parse_level(argv[i] + 11);
 
-            if (loglevel == -1)
-                mf_show_usage();
-        } else if (strncmp(argv[i], "--logfile=", 10) == 0) {
-            logfile = argv[i] + 10;
+                if (loglevel == -1)
+                    mf_show_usage("Invalid log level");
+            } else if (strncmp(argv[i], "--logfile=", 10) == 0) {
+                logfile = argv[i] + 10;
+
+                if (strlen(logfile) == 0)
+                    mf_show_usage("Invalid log file name");
+            } else {
+                fuseopts[numfuseopts++] = argv[i];
+            }
         } else {
-            if (i == argc - 1)
+            if (i == argc - 1 && numfilenames < 1) {
+                mf_show_usage("Missing file names");
+            } else if (i == argc - 1)
                 fuseopts[numfuseopts++] = argv[i];
             else
                 filenames[numfilenames++] = argv[i];
@@ -1136,10 +1154,13 @@ int main(int argc, char** argv)
         i++;
     }
 
+    if (numfuseopts < 2 || numfilenames < 1)
+        mf_show_usage("Wrong number of arguments");
+
     ret = pthread_mutex_init(&lock, NULL);
 
     if (ret != 0) {
-        mf_log_fatal("Could not initialize lock: %s\n", strerror(ret));
+        fprintf(stderr, "Could not initialize mutex: %s\n", strerror(ret));
         exit(EXIT_FAILURE);
     }
 
@@ -1147,7 +1168,7 @@ int main(int argc, char** argv)
         ret = mf_log_init(loglevel, logfile, "w+");
 
         if (ret < 0) {
-            mf_log_fatal("Could not initialize log: %s\n", strerror(-ret));
+            fprintf(stderr, "Could not initialize log: %s\n", strerror(-ret));
             exit(EXIT_FAILURE);
         }
     }
@@ -1155,7 +1176,7 @@ int main(int argc, char** argv)
     ret = mf_init(numfilenames, filenames);
 
     if (ret != 0) {
-        mf_log_fatal("Could not initialize file system: %s\n", strerror(errno));
+        fprintf(stderr, "Could not initialize file system: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
